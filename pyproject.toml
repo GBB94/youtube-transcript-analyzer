@@ -1,0 +1,31 @@
+[project]
+name = "transcript-tool"
+version = "0.1.0"
+description = "Staged, policy-driven video transcript acquisition (Phase 1 starter)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+captions = ["youtube-transcript-api>=0.6"]   # Phase 2
+media = ["yt-dlp>=2025.11.12"]               # Phase 3 (needs a JS runtime + EJS; PO-token plugin pinned separately)
+asr = ["faster-whisper>=1.0"]                # Phase 4
+asr_test = ["jiwer>=3.0"]                    # Phase 4 regression
+discovery = ["google-api-python-client>=2.0"] # Phase 6
+cli = ["rich>=13.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+transcript = "transcript_tool.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
