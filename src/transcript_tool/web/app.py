@@ -27,15 +27,7 @@ MAX_BATCH = 50
 DEFAULT_DB = str(Path("~/.cache/transcript-tool/web-jobs.sqlite").expanduser())
 
 RunWorker = Callable[[str], None]       # (job_id) -> launch processing
-
-
-def _spawn_worker(db_path: str) -> RunWorker:
-    def run(job_id: str) -> None:
-        import multiprocessing as mp
-        from .worker import process_job
-        ctx = mp.get_context("spawn")
-        ctx.Process(target=process_job, args=(db_path, job_id), daemon=True).start()
-    return run
+CancelWorker = Callable[[str], None]    # (job_id) -> stop in-flight compute
 
 
 def _now_iso() -> str:
@@ -49,13 +41,33 @@ def _row_payload(item: dict) -> dict:
             "retry": bool(item["retry"]), "words": item["words"] or 0, "url": item["url"]}
 
 
-def create_app(db_path: Optional[str] = None, run_worker: Optional[RunWorker] = None) -> FastAPI:
+def create_app(db_path: Optional[str] = None, run_worker: Optional[RunWorker] = None,
+               cancel_worker: Optional[CancelWorker] = None) -> FastAPI:
     app = FastAPI(title="Batch Transcripts")
     db_path = db_path or DEFAULT_DB
     Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     store = JobStore(db_path)
     app.state.store = store
-    app.state.run_worker = run_worker or _spawn_worker(db_path)
+    app.state.workers = {}        # job_id -> spawned worker Process (default impl)
+
+    def _spawn(job_id: str) -> None:
+        import multiprocessing as mp
+        from .worker import process_job
+        p = mp.get_context("spawn").Process(target=process_job, args=(db_path, job_id), daemon=True)
+        p.start()
+        app.state.workers[job_id] = p
+
+    def _terminate(job_id: str) -> None:
+        # Real cancel: kill the worker process so in-flight transcription compute stops.
+        p = app.state.workers.pop(job_id, None)
+        if p is not None and p.is_alive():
+            p.terminate()
+            p.join(3)
+            if p.is_alive():
+                p.kill()
+
+    app.state.run_worker = run_worker or _spawn
+    app.state.cancel_worker = cancel_worker or _terminate
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
@@ -66,33 +78,57 @@ def create_app(db_path: Optional[str] = None, run_worker: Optional[RunWorker] = 
         return _TEMPLATES.TemplateResponse(request, "_validation.html",
                                            {"parsed": parse_targets(links)})
 
+    def _err(request, message):
+        return _TEMPLATES.TemplateResponse(
+            request, "job.html", {"error": message, "rows": [], "job_id": None})
+
     @app.post("/transcribe")
-    def transcribe(request: Request, links: str = Form("")):
+    def transcribe(request: Request, links: str = Form(""), asr: str = Form("")):
         parsed = parse_targets(links)
         if not parsed.valid:
-            return _TEMPLATES.TemplateResponse(
-                request, "job.html",
-                {"error": "No valid YouTube links to transcribe.", "rows": [], "job_id": None})
+            return _err(request, "No valid YouTube links to transcribe.")
         if len(parsed.valid) > MAX_BATCH:
-            return _TEMPLATES.TemplateResponse(
-                request, "job.html",
-                {"error": f"Keep it to {MAX_BATCH} links per batch.", "rows": [], "job_id": None})
+            return _err(request, f"Keep it to {MAX_BATCH} links per batch.")
         job_id = uuid.uuid4().hex
-        store.create_job(job_id, _now_iso(), ["en"], parsed.valid)
+        store.create_job(job_id, _now_iso(), ["en"], parsed.valid, asr=bool(asr))
         app.state.run_worker(job_id)        # separate worker process picks it up
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    def _job_view(request, job_id):
+        items = store.get_items(job_id)         # current state -> refresh survives
+        counts = store.counts(job_id)
+        job = store.get_job(job_id)
+        return _TEMPLATES.TemplateResponse(
+            request, "job.html",
+            {"error": None, "job_id": job_id, "rows": [_row_payload(i) for i in items],
+             "n_ok": counts["complete"], "n_total": counts["total"],
+             "finished": counts["finished"], "active": counts["active"],
+             "retryable": counts["retryable"], "asr": bool(job and job["asr"])})
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def job_page(request: Request, job_id: str):
         if store.get_job(job_id) is None:
-            return _TEMPLATES.TemplateResponse(
-                request, "job.html", {"error": "Unknown job.", "rows": [], "job_id": None})
-        items = store.get_items(job_id)         # current state -> refresh survives
-        counts = store.counts(job_id)
-        return _TEMPLATES.TemplateResponse(
-            request, "job.html",
-            {"error": None, "job_id": job_id, "rows": [_row_payload(i) for i in items],
-             "n_ok": counts["complete"], "n_total": counts["total"]})
+            return _err(request, "Unknown job.")
+        return _job_view(request, job_id)
+
+    @app.post("/jobs/{job_id}/cancel")
+    def cancel(job_id: str):
+        if store.get_job(job_id) is not None:
+            app.state.cancel_worker(job_id)     # stop in-flight compute
+            store.request_cancel(job_id)        # reconcile queued/running -> cancelled
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.post("/jobs/{job_id}/items/{idx}/retry")
+    def retry_item(job_id: str, idx: int):
+        if store.requeue_item(job_id, idx):
+            app.state.run_worker(job_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.post("/jobs/{job_id}/retry-failed")
+    def retry_failed(job_id: str):
+        if store.requeue_failed(job_id):
+            app.state.run_worker(job_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     @app.get("/jobs/{job_id}/events")
     def job_events(job_id: str):

@@ -19,18 +19,28 @@ from .parse import Target
 PullFn = Callable[[Target], Result]
 
 
-def default_pull(target: Target) -> Result:
-    """Captions-first pull via the engine (no ASR in UI-1/2). Public-URL egress is on:
+def make_pull(asr: bool = False) -> PullFn:
+    """Build the captions-first pull. When `asr` is set, local_whisper is appended as
+    the floor (slower; runs locally, no per-transcript fee). Public-URL egress is on:
     running the local app + pasting links is the operator's acknowledgment."""
-    from ..cache import Cache
-    from ..orchestrator import get_transcript_sync
-    from ..policy import EgressPolicy, Policy
-    policy = Policy(
-        enabled_strategies=("api_captions", "ytdlp_subs"),
-        egress=EgressPolicy(allow_network=True, allow_public_url=True),
-    )
-    cache = Cache(Path("~/.cache/transcript-tool").expanduser())
-    return get_transcript_sync(target.ref(), policy, cache)
+    strategies = ("api_captions", "ytdlp_subs") + (("local_whisper",) if asr else ())
+
+    def pull(target: Target) -> Result:
+        from ..cache import Cache
+        from ..orchestrator import get_transcript_sync
+        from ..policy import EgressPolicy, Policy
+        policy = Policy(
+            mode="prefer-captions",
+            enabled_strategies=strategies,
+            egress=EgressPolicy(allow_network=True, allow_public_url=True),
+        )
+        cache = Cache(Path("~/.cache/transcript-tool").expanduser())
+        return get_transcript_sync(target.ref(), policy, cache)
+    return pull
+
+
+def default_pull(target: Target) -> Result:
+    return make_pull(asr=False)(target)
 
 
 def _process_item(store: JobStore, job_id: str, item: dict, pull: PullFn) -> None:
@@ -49,10 +59,15 @@ def _process_item(store: JobStore, job_id: str, item: dict, pull: PullFn) -> Non
 
 def process_job(db_path: str, job_id: str, pull: Optional[PullFn] = None) -> None:
     """Drain every queued item in the job, then finalize. Safe to run as the spawn
-    target in a child process."""
+    target in a child process. Stops promptly if the job is cancelled between items;
+    in-flight compute is stopped by terminating this process (the web app does that)."""
     store = JobStore(db_path)
-    pull = pull or default_pull
+    if pull is None:
+        job = store.get_job(job_id)
+        pull = make_pull(asr=bool(job and job["asr"]))
     while True:
+        if store.is_cancelled(job_id):          # cooperative cancel between items
+            return
         item = store.claim_next_queued(job_id)
         if item is None:
             break

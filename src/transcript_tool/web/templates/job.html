@@ -11,26 +11,55 @@
     .badge { background: #e7f0ff; color: #1b4fa0; border-radius: 4px; padding: .1rem .4rem; font-size: .8rem; }
     .state { color: #555; }
     .fail { color: #b00020; }
+    .cancelled { color: #888; }
     .vid { color: #888; font-size: .85rem; margin-left: auto; }
     .err { color: #b00020; }
-    a.download { display: inline-block; margin: 1rem 0; padding: .6rem 1rem; background: #1b4fa0; color: #fff; text-decoration: none; border-radius: 6px; }
+    .controls { display: flex; gap: .6rem; align-items: center; margin: 1rem 0; flex-wrap: wrap; }
+    a.download, button { font: inherit; padding: .5rem .9rem; border-radius: 6px; cursor: pointer; }
+    a.download { background: #1b4fa0; color: #fff; text-decoration: none; }
     a.download[hidden] { display: none; }
+    button.secondary { background: #fff; border: 1px solid #bbb; }
+    button.danger { background: #fff; border: 1px solid #b00020; color: #b00020; }
+    form.inline { display: inline; }
+    :focus-visible { outline: 3px solid #1b4fa0; outline-offset: 2px; }
   </style>
 </head>
 <body>
   <h1>Results</h1>
   {% if error %}
-    <p class="err">{{ error }}</p>
+    <p class="err" role="alert">{{ error }}</p>
   {% else %}
     <p id="progress" role="status" aria-live="polite">{{ n_ok }} of {{ n_total }} complete.</p>
-    <a id="download" class="download" href="/jobs/{{ job_id }}/transcripts.md" {% if n_ok == 0 %}hidden{% endif %}>Download Markdown</a>
-    <div id="rows">
+
+    <div class="controls">
+      <a id="download" class="download" href="/jobs/{{ job_id }}/transcripts.md"
+         {% if n_ok == 0 %}hidden{% endif %}>Download Markdown</a>
+      {% if not finished and active > 0 %}
+        <form class="inline" method="post" action="/jobs/{{ job_id }}/cancel">
+          <button type="submit" class="danger" aria-label="Cancel this batch">Cancel</button>
+        </form>
+      {% endif %}
+      {% if finished and retryable > 0 %}
+        <form class="inline" method="post" action="/jobs/{{ job_id }}/retry-failed">
+          <button type="submit" class="secondary">Retry all failed ({{ retryable }})</button>
+        </form>
+      {% endif %}
+    </div>
+
+    <div id="rows" aria-live="polite">
       {% for row in rows %}
         <div class="row" id="row-{{ row.idx }}">
           {% if row.ok %}
             <span class="badge">{{ row.badge }}</span><span class="state">{{ row.words }} words</span>
           {% elif row.status == 'failed' %}
-            <span class="fail">Failed — {{ row.message }}{% if row.retry %} (retryable){% endif %}</span>
+            <span class="fail">Failed — {{ row.message }}</span>
+            {% if row.retry %}
+              <form class="inline" method="post" action="/jobs/{{ job_id }}/items/{{ row.idx }}/retry">
+                <button type="submit" class="secondary" aria-label="Retry this video">Retry</button>
+              </form>
+            {% endif %}
+          {% elif row.status == 'cancelled' %}
+            <span class="cancelled">Cancelled</span>
           {% else %}
             <span class="state">{{ 'Fetching captions…' if row.status == 'running' else 'Queued' }}</span>
           {% endif %}
@@ -41,13 +70,14 @@
   {% endif %}
   <p><a href="/">← New batch</a></p>
 
-  {% if job_id %}
+  {% if job_id and not finished %}
   <script>
     const jobId = {{ job_id|tojson }};
     const es = new EventSource(`/jobs/${jobId}/events`);
     function label(d) {
       if (d.ok) return `<span class="badge">${d.badge}</span><span class="state">${d.words} words</span>`;
-      if (d.status === 'failed') return `<span class="fail">Failed — ${d.message}${d.retry ? ' (retryable)' : ''}</span>`;
+      if (d.status === 'failed') return `<span class="fail">Failed — ${d.message}</span>`;
+      if (d.status === 'cancelled') return `<span class="cancelled">Cancelled</span>`;
       return `<span class="state">${d.status === 'running' ? 'Fetching captions…' : 'Queued'}</span>`;
     }
     es.addEventListener('item', e => {
@@ -60,7 +90,9 @@
       document.getElementById('progress').textContent = `${c.complete} of ${c.total} complete.`;
       if (c.complete > 0) document.getElementById('download').hidden = false;
     });
-    es.addEventListener('done', () => es.close());
+    // On completion, reload once so server-rendered Retry/Cancel controls reflect the
+    // final state. The reloaded page has finished=true, so no EventSource re-opens.
+    es.addEventListener('done', () => { es.close(); location.reload(); });
   </script>
   {% endif %}
 </body>

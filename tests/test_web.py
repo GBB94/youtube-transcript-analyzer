@@ -8,12 +8,12 @@ import time
 from fastapi.testclient import TestClient
 
 from transcript_tool.schema import (
-    Language, Outcome, Provenance, Reason, Result, Segment, TimestampType, VideoRef,
+    Language, Outcome, Provenance, Reason, Result, Retry, Segment, TimestampType, VideoRef,
 )
 from transcript_tool.web.app import create_app
 from transcript_tool.web.markdown import Record, render
 from transcript_tool.web.parse import Target, parse_targets
-from transcript_tool.web.worker import process_job
+from transcript_tool.web.worker import make_pull, process_job
 
 A, B, C = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"
 
@@ -131,3 +131,91 @@ def test_no_valid_links_is_handled(tmp_path):
 
 def test_unknown_job_is_404_for_download(tmp_path):
     assert _client(tmp_path).get("/jobs/deadbeef/transcripts.md").status_code == 404
+
+
+# --- UI-4: retry / cancel / ASR ----------------------------------------------
+
+def _job_id(resp):
+    return str(resp.url).rstrip("/").split("/")[-1]
+
+
+def test_retry_failed_requeues_and_succeeds_second_time(tmp_path):
+    """A retry-eligible failure (rate_limited) can be retried; second attempt succeeds."""
+    calls = {}
+
+    def stateful(target):
+        calls[target.video_id] = calls.get(target.video_id, 0) + 1
+        if target.video_id == C and calls[C] == 1:
+            return Result.make_failed(target.ref(), Reason.rate_limited,
+                                      retry=Retry(eligible=True, max_attempts=3))
+        return _ok(target, f"t {target.video_id}")
+
+    client = _client(tmp_path, pull=stateful)
+    r = client.post("/transcribe", data={"links": f"{A}\n{C}"})
+    job_id = _job_id(r)
+    assert "Retry all failed" in r.text and "Temporary problem" in r.text   # C failed, retryable
+
+    again = client.post(f"/jobs/{job_id}/retry-failed")                      # reprocess
+    assert "2 of 2 complete" in again.text                                  # C now succeeded
+
+
+def test_retry_single_item(tmp_path):
+    calls = {}
+
+    def stateful(target):
+        calls[target.video_id] = calls.get(target.video_id, 0) + 1
+        if target.video_id == C and calls[C] == 1:
+            return Result.make_failed(target.ref(), Reason.timeout, retry=Retry(eligible=True))
+        return _ok(target, "ok")
+
+    client = _client(tmp_path, pull=stateful)
+    job_id = _job_id(client.post("/transcribe", data={"links": f"{A}\n{C}"}))
+    # the failed item exposes a retry endpoint at its idx (C is idx 1)
+    again = client.post(f"/jobs/{job_id}/items/1/retry")
+    assert "2 of 2 complete" in again.text
+
+
+def test_non_retryable_failure_offers_no_retry(tmp_path):
+    # captions_unavailable is not retry-eligible -> no Retry control, retryable count 0
+    r = _client(tmp_path).post("/transcribe", data={"links": f"{A}\n{C}"})
+    assert "Retry all failed" not in r.text
+
+
+def test_cancel_reconciles_queued_items(tmp_path):
+    cancelled_calls = []
+    db = str(tmp_path / "jobs.sqlite")
+    # run_worker is a no-op so items stay queued; cancel must reconcile them to cancelled.
+    client = TestClient(create_app(db_path=db, run_worker=lambda jid: None,
+                                   cancel_worker=lambda jid: cancelled_calls.append(jid)))
+    job_id = _job_id(client.post("/transcribe", data={"links": f"{A}\n{B}"}))
+    r = client.post(f"/jobs/{job_id}/cancel")
+    assert cancelled_calls == [job_id]              # in-flight kill hook invoked
+    assert "Cancelled" in r.text
+    store = client.app.state.store
+    assert store.get_job(job_id)["status"] == "cancelled"
+    assert all(i["status"] == "cancelled" for i in store.get_items(job_id))
+
+
+def test_asr_flag_is_persisted_on_job(tmp_path):
+    client = _client(tmp_path)
+    with_asr = _job_id(client.post("/transcribe", data={"links": A, "asr": "on"}))
+    without = _job_id(client.post("/transcribe", data={"links": B}))
+    store = client.app.state.store
+    assert store.get_job(with_asr)["asr"] == 1
+    assert store.get_job(without)["asr"] == 0
+
+
+def test_make_pull_appends_local_whisper_only_when_asr(monkeypatch):
+    seen = {}
+
+    def fake_get(ref, policy, cache):
+        seen["strategies"] = policy.enabled_strategies
+        return _ok(Target("x", "x", "u"), "body")
+
+    import transcript_tool.orchestrator as orch
+    monkeypatch.setattr(orch, "get_transcript_sync", fake_get)
+
+    make_pull(asr=False)(Target("x", "x", "https://youtu.be/x"))
+    assert "local_whisper" not in seen["strategies"]
+    make_pull(asr=True)(Target("x", "x", "https://youtu.be/x"))
+    assert "local_whisper" in seen["strategies"]

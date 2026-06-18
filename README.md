@@ -13,8 +13,9 @@ transcript serve            # http://127.0.0.1:8000
 ```
 Paste YouTube links → live per-row progress → download one Markdown file. Captions-first,
 local, and private. Durable SQLite jobs (refresh-survivable), a separate worker process,
-and live SSE updates. Scope + build phases: `docs/UI_SCOPE.md`. (Retry/cancel, ASR opt-in
-with a cost line, and the full accessibility pass are UI-4.)
+live SSE updates, per-item **Retry** / **Retry all failed** / **Cancel** (cancel actually
+kills in-flight compute), an opt-in audio-transcription fallback with a cost note, and an
+accessible UI (`role="status"` live regions, labels, keyboard). Scope: `docs/UI_SCOPE.md`.
 
 ## Quickstart
 ```
