@@ -6,6 +6,15 @@ audio ASR as the floor.
 - **Start here:** `CLAUDE.md` (working agreement) and `docs/DESIGN.md` (full spec).
 - **Phase 1 task notes:** `docs/PHASE_1_BUILD.md`.
 
+## Batch web UI (local)
+```
+pip install -e ".[web]"
+transcript serve            # http://127.0.0.1:8000
+```
+Paste YouTube links → review → download one Markdown file. Captions-first, local, and
+private. Scope + build phases: `docs/UI_SCOPE.md`. (UI-1: synchronous paste→Markdown;
+the SQLite job model + worker + live SSE updates land in UI-2+.)
+
 ## Quickstart
 ```
 pip install -e ".[dev]"        # or: pip install pydantic pytest

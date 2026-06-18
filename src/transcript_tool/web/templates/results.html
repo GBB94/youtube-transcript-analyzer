@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch Transcripts — Results</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    .row { padding: .5rem 0; border-bottom: 1px solid #eee; display: flex; gap: .6rem; align-items: baseline; }
+    .badge { background: #e7f0ff; color: #1b4fa0; border-radius: 4px; padding: .1rem .4rem; font-size: .8rem; }
+    .fail { color: #b00020; }
+    .vid { color: #555; font-size: .85rem; }
+    .err { color: #b00020; }
+    a.download { display: inline-block; margin: 1rem 0; padding: .6rem 1rem; background: #1b4fa0; color: #fff; text-decoration: none; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Results</h1>
+  {% if error %}
+    <p class="err">{{ error }}</p>
+  {% else %}
+    <p role="status" aria-live="polite">{{ n_ok }} of {{ n_total }} complete.</p>
+    {% if n_ok > 0 %}
+      <a class="download" href="/download/{{ token }}.md">Download Markdown</a>
+    {% endif %}
+    <div>
+      {% for row in rows %}
+        <div class="row">
+          {% if row.ok %}
+            <span class="badge">{{ row.badge }}</span>
+            <span>{{ row.words }} words</span>
+          {% else %}
+            <span class="fail">Failed — {{ row.message }}{% if row.retry %} (retryable){% endif %}</span>
+          {% endif %}
+          <span class="vid">{{ row.url }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  <p><a href="/">← New batch</a></p>
+</body>
+</html>
