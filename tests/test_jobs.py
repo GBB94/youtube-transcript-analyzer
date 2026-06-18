@@ -11,6 +11,24 @@ def _targets():
     return [Target(A, A, f"https://youtu.be/{A}"), Target(B, B, f"https://youtu.be/{B}")]
 
 
+def test_migrates_old_db_missing_asr_column(tmp_path):
+    """A DB created by a pre-UI-4 version (no `asr` column) must self-heal on open,
+    not crash on the next insert."""
+    import sqlite3
+    db = tmp_path / "old.sqlite"
+    # Simulate the old schema: jobs without the `asr` column.
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, created_at TEXT, languages TEXT, status TEXT)")
+    conn.commit()
+    conn.close()
+
+    store = JobStore(db)                       # __init__ runs the additive migration
+    cols = {r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(jobs)")}
+    assert "asr" in cols
+    store.create_job("j", "t", ["en"], _targets(), asr=True)   # the insert that used to fail
+    assert store.get_job("j")["asr"] == 1
+
+
 def test_create_and_read_persists_across_reopen(tmp_path):
     db = tmp_path / "jobs.sqlite"
     JobStore(db).create_job("j1", "2026-06-18T00:00:00+00:00", ["en"], _targets())
