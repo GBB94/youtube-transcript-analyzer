@@ -108,7 +108,6 @@ _UNAVAILABLE_PERMANENT = {
 }
 _UNAVAILABLE_CONTEXTUAL = {
     Reason.members_only, Reason.age_restricted, Reason.geoblocked,
-    Reason.bot_gated, Reason.access_challenge,
 }
 _UNAVAILABLE_TRANSIENT = {Reason.live}
 

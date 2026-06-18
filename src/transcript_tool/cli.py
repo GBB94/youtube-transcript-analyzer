@@ -26,21 +26,49 @@ def _emit(obj) -> None:
     print(json.dumps(obj, ensure_ascii=False), file=sys.stdout)
 
 
+CAPTION_SUFFIXES = {".vtt", ".srt"}
+AUDIO_SUFFIXES = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".mp4", ".mkv", ".webm", ".mov"}
+
+
+def _classify_target(target: str):
+    """Return (VideoRef, default_strategies) for a file path or URL."""
+    if target.startswith("http://") or target.startswith("https://"):
+        return (VideoRef(platform="youtube", source="url", url=target),
+                ("api_captions", "ytdlp_subs", "local_whisper"))
+    p = Path(target).expanduser()
+    suffix = p.suffix.lower()
+    ref = VideoRef(platform="local", source="uploaded_file", path=str(p))
+    if suffix in AUDIO_SUFFIXES:
+        return ref, ("local_whisper",)
+    return ref, ("uploaded_caption",)
+
+
 def cmd_pull(args: argparse.Namespace) -> int:
+    ref, strategies = _classify_target(args.target)
+    if args.strategies:
+        strategies = tuple(args.strategies)
+    egress = EgressPolicy(
+        allow_network=ref.source == "url",
+        allow_public_url=args.enable_public_url,
+    )
     policy = Policy(
         mode=args.policy,
         languages=tuple(args.lang),
-        enabled_strategies=("uploaded_caption",),
-        egress=EgressPolicy(allow_network=False),
+        enabled_strategies=strategies,
+        egress=egress,
     )
     cache = None if args.force else Cache(Path(args.cache_dir).expanduser())
 
-    target = Path(args.target).expanduser()
-    if not target.exists():
-        _log(f"error: no such file: {target}")
+    if ref.source == "url" and not args.enable_public_url:
+        _log("error: public-URL extraction is a gated capability. "
+             "Pass --enable-public-url to acknowledge the policy decision (see DESIGN.md §4).")
         return 2
-    ref = VideoRef(platform="local", source="uploaded_file", path=str(target))
-    _log(f"pull: {target.name} (policy={policy.mode}, langs={list(policy.languages)})")
+    if ref.source == "uploaded_file" and not Path(ref.path).exists():
+        _log(f"error: no such file: {ref.path}")
+        return 2
+
+    label = ref.url or Path(ref.path).name
+    _log(f"pull: {label} (policy={policy.mode}, strategies={list(strategies)})")
     result = get_transcript_sync(ref, policy, cache)
     _log(f"outcome={result.outcome.value}"
          + (f" reason={result.reason.value}" if result.reason else "")
@@ -90,11 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache-dir", default="~/.cache/transcript-tool")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pull = sub.add_parser("pull", help="produce a transcript from a caption file (Phase 1)")
-    pull.add_argument("target")
+    pull = sub.add_parser("pull", help="produce a transcript from a caption/audio file or URL")
+    pull.add_argument("target", help="path to a .vtt/.srt/audio file, or an http(s) URL")
     pull.add_argument("--policy", choices=["captions-only", "prefer-captions", "asr-only"],
                       default="prefer-captions")
     pull.add_argument("--lang", nargs="+", default=["en"])
+    pull.add_argument("--strategies", nargs="+", help="override the strategy order")
+    pull.add_argument("--enable-public-url", action="store_true",
+                      help="acknowledge the policy decision to extract from public URLs (gated)")
     pull.add_argument("--force", action="store_true", help="bypass cache")
     pull.set_defaults(func=cmd_pull)
 

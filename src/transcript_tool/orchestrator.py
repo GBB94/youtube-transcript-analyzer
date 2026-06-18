@@ -19,17 +19,20 @@ from .schema import (
 )
 from .strategies.base import Strategy
 from .strategies.uploaded_caption import UploadedCaptionStrategy
+from .strategies.api_captions import ApiCaptionsStrategy
+from .strategies.ytdlp_subs import YtdlpSubsStrategy
+from .strategies.local_whisper import LocalWhisperStrategy
 from .strategies import _stubs
 
 # Registry: name -> strategy instance. Order is resolved per-request from policy.
 REGISTRY: dict[str, Strategy] = {
-    "uploaded_caption": UploadedCaptionStrategy(),
-    "api_captions": _stubs.ApiCaptionsStrategy(),
-    "ytdlp_subs": _stubs.YtdlpSubsStrategy(),
-    "local_whisper": _stubs.LocalWhisperStrategy(),
-    "managed_native": _stubs.ManagedNativeStrategy(),
-    "managed_asr": _stubs.ManagedAsrStrategy(),
-    "managed_url_to_asr": _stubs.ManagedUrlToAsrStrategy(),
+    "uploaded_caption": UploadedCaptionStrategy(),   # Phase 1
+    "api_captions": ApiCaptionsStrategy(),           # Phase 2
+    "ytdlp_subs": YtdlpSubsStrategy(),               # Phase 3
+    "local_whisper": LocalWhisperStrategy(),         # Phase 4
+    "managed_native": _stubs.ManagedNativeStrategy(),       # Phase 5
+    "managed_asr": _stubs.ManagedAsrStrategy(),             # Phase 5
+    "managed_url_to_asr": _stubs.ManagedUrlToAsrStrategy(), # Phase 5
 }
 
 

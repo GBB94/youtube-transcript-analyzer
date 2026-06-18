@@ -1,32 +1,62 @@
-"""ASR model provisioning contract (implemented in Phase 4).
+"""ASR model provisioning (Phase 4).
 
-"Preload" is precise here and must not be conflated:
-  - Pre-provision AND checksum the model artifact ahead of time (out of band).
-  - local profile: lazily LOAD into memory from local-only storage the first time
-    ASR is actually needed — a caption-first run must not load a multi-GB model.
-  - server profile: WARM ASR workers at startup.
-  - NEVER download a model during an active transcription request.
+"Preload" is precise and must not be conflated:
+  - Pre-provision AND checksum the model artifact ahead of time (provision()).
+  - Load LAZILY from local-only storage on first ASR use (load_lazy, local profile)
+    or warm at startup (server). NEVER download a model during a request:
+    load_lazy uses local_files_only=True, so a missing model raises ModelUnavailable
+    (mapped to `missing_dependency`) instead of silently downloading GBs.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Dict, Tuple
+
+
+class ModelUnavailable(RuntimeError):
+    """faster-whisper not installed, or the pinned model isn't provisioned locally."""
 
 
 @dataclass(frozen=True)
 class ModelSpec:
     name: str = "faster-whisper"
     size: str = "small"          # CPU default; large-v3 on GPU
-    revision: str = ""           # pin exactly
+    revision: str = ""           # pin exactly when known
     compute_type: str = "int8"   # pin exactly
+    device: str = "cpu"
+
+
+_CACHE: Dict[Tuple[str, str, str, str], Any] = {}
 
 
 def provision(spec: ModelSpec, store_dir: str) -> str:
-    """Download + checksum the model into local-only storage. Out-of-band setup,
-    never called on the request path. Returns the verified local path."""
-    raise NotImplementedError("Phase 4: provision + checksum model artifact")
+    """Out-of-band: download + cache the model into local-only storage. NEVER called
+    on the request path. Returns the store dir once present."""
+    try:
+        from faster_whisper import WhisperModel  # noqa: F401
+        from faster_whisper.utils import download_model
+    except Exception as e:  # pragma: no cover - environment dependent
+        raise ModelUnavailable("faster-whisper not installed") from e
+    download_model(spec.size, output_dir=None, cache_dir=store_dir)
+    return store_dir
 
 
-def load_lazy(spec: ModelSpec, store_dir: str):
-    """Load from local-only storage on first ASR use (local profile). Must fail
-    with missing_dependency (not a silent download) if the artifact isn't present."""
-    raise NotImplementedError("Phase 4: lazy local load (no network)")
+def load_lazy(spec: ModelSpec, store_dir: str) -> Any:
+    """Load the model into memory from local-only storage. Cached per spec.
+    Raises ModelUnavailable (never downloads) if absent."""
+    key = (spec.size, spec.revision, spec.compute_type, spec.device)
+    if key in _CACHE:
+        return _CACHE[key]
+    try:
+        from faster_whisper import WhisperModel
+    except Exception as e:
+        raise ModelUnavailable("faster-whisper not installed") from e
+    try:
+        model = WhisperModel(
+            spec.size, device=spec.device, compute_type=spec.compute_type,
+            download_root=store_dir, local_files_only=True,   # never download mid-request
+        )
+    except Exception as e:
+        raise ModelUnavailable(f"model '{spec.size}' not provisioned in {store_dir}") from e
+    _CACHE[key] = model
+    return model

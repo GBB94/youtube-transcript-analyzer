@@ -87,8 +87,11 @@ src/transcript_tool/
   cli.py           # pull / find / doctor
   strategies/
     base.py            # Strategy protocol
-    uploaded_caption.py  # Phase 1 (built)
-    _stubs.py            # api_captions/ytdlp_subs/local_whisper/managed_* (later phases)
+    uploaded_caption.py  # P1   api_captions.py  # P2
+    ytdlp_subs.py        # P3   local_whisper.py # P4
+    _stubs.py            # managed_* (P5)
+  asr_eval.py        # jiwer regression harness (P4)
+  media.py           # yt-dlp audio acquisition for URL->ASR (live-only)
 tests/             # pytest; golden VTT fixtures govern dedup
 docs/DESIGN.md     # the authoritative v3 spec
 docs/PHASE_1_BUILD.md  # the current task
@@ -103,13 +106,23 @@ transcript doctor
 ```
 
 ## What's built vs stubbed
-- **Built (Phase 1):** schema/outcome model, policy + policy_hash, preflight,
+- **Built (Phases 1–4):** schema/outcome model, policy + policy_hash, preflight,
   normalization + dedup (fixture-tested), source-aware quality gates, two-layer
   cache with the full lifecycle contract, orchestrator + singleflight, sync guard,
-  CLI (`pull` works on caption files), `uploaded_caption` strategy.
-- **Stubbed (raise `NotImplementedError`, with contract docstrings):** `api_captions`
-  (P2), `ytdlp_subs` (P3), `local_whisper` (P4), `managed_*` (P5), discovery (P6),
-  server profile (P7).
+  CLI (`pull` handles caption files, audio files, and gated URLs).
+  - `uploaded_caption` (P1), `api_captions` (P2, youtube-transcript-api),
+    `ytdlp_subs` (P3, yt-dlp), `local_whisper` (P4, faster-whisper) + the `jiwer`
+    regression harness (`asr_eval.py`) + model provisioning contract.
+  - All strategies are unit-tested via **dependency injection** (fake client /
+    runner / transcriber); the live YouTube and real-model paths are verified on a
+    real machine, not in CI.
+- **Stubbed (raise `NotImplementedError`, with contract docstrings):**
+  `managed_native` / `managed_asr` / `managed_url_to_asr` (P5), discovery (P6),
+  server profile (P7), hardening suites (P8).
+
+> Public-URL strategies (`api_captions`, `ytdlp_subs`, and `local_whisper` from a
+> URL) are gated by `EgressPolicy.allow_public_url` and the CLI's
+> `--enable-public-url` flag. Do not enable by default; honor `DESIGN.md §4`.
 
 ## Supported platforms (v1)
 Tested target: **macOS ARM (CPU)**. Linux x86-64 should work; process-tree kill,
