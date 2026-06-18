@@ -1,0 +1,15 @@
+1
+00:00:00,000 --> 00:00:02,000
+the quick brown fox
+
+2
+00:00:02,000 --> 00:00:04,000
+the quick brown fox jumps over
+
+3
+00:00:04,000 --> 00:00:06,000
+jumps over the lazy dog
+
+4
+00:00:06,000 --> 00:00:08,000
+the lazy dog and then runs away

@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:02,000
+hello from an srt file
+
+2
+00:00:02,000 --> 00:00:04,000
+with numeric index lines
+
+3
+00:00:04,000 --> 00:00:06,000
+and comma millisecond separators
