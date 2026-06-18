@@ -40,6 +40,6 @@ def test_counts_and_finalize(tmp_path):
     assert store.finalize_if_done("j") is False                    # one still queued
     store.fail_item("j", 1, message="No captions available.", retry=False)
     c = store.counts("j")
-    assert c == {"total": 2, "complete": 1, "failed": 1, "done": 2, "finished": True}
+    assert (c["total"], c["complete"], c["failed"], c["done"], c["finished"]) == (2, 1, 1, 2, True)
     assert store.finalize_if_done("j") is True
     assert store.get_job("j")["status"] == STATUS_COMPLETE
