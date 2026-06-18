@@ -106,6 +106,19 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return _pull_one(args.target, args, cache)
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the local batch transcript web UI (UI-1)."""
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        _log("error: the web UI needs the 'web' extra -> pip install '.[web]'")
+        return 2
+    _log(f"serving the batch UI on http://{args.host}:{args.port}  (Ctrl-C to stop)")
+    import uvicorn
+    uvicorn.run("transcript_tool.web.app:app", host=args.host, port=args.port, reload=args.reload)
+    return 0
+
+
 def cmd_bakeoff(args: argparse.Namespace) -> int:
     """Phase 0 reliability bakeoff: run a corpus through the real pipeline and report
     per-path success/reason/latency/cost. Run on real hardware for the public-URL
@@ -296,6 +309,12 @@ def build_parser() -> argparse.ArgumentParser:
     bake.add_argument("--use-cache", action="store_true",
                       help="include cache hits (default: run fresh to measure acquisition)")
     bake.set_defaults(func=cmd_bakeoff)
+
+    serve = sub.add_parser("serve", help="run the local batch transcript web UI (UI-1)")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--reload", action="store_true", help="auto-reload (dev)")
+    serve.set_defaults(func=cmd_serve)
     return p
 
 

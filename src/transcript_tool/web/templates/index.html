@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch Transcripts</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    textarea { width: 100%; min-height: 9rem; font: inherit; padding: .6rem; box-sizing: border-box; }
+    .summary { margin: .5rem 0; color: #444; }
+    .invalid { color: #b00020; }
+    button { font: inherit; padding: .6rem 1rem; cursor: pointer; }
+    .hint { color: #666; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Batch Transcripts</h1>
+  <p class="hint">Paste YouTube links (one per line, or comma/space separated). Captions-first — fast and private; nothing leaves your machine.</p>
+  <form method="post" action="/transcribe">
+    <textarea name="links" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…&#10;dQw4w9WgXcQ"
+              hx-post="/validate" hx-target="#validation" hx-trigger="keyup changed delay:300ms, change"></textarea>
+    <div id="validation" class="summary" role="status" aria-live="polite"></div>
+    <button type="submit">Create transcripts</button>
+  </form>
+</body>
+</html>

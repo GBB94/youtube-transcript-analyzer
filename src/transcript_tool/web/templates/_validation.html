@@ -1,0 +1,10 @@
+{% if parsed.valid or parsed.invalid %}
+  <span>{{ parsed.summary() }}</span>
+  {% if parsed.invalid %}
+    <ul class="invalid">
+      {% for item in parsed.invalid %}
+        <li>{{ item.raw }} — {{ item.reason }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endif %}
