@@ -80,10 +80,27 @@ class LocalWhisperStrategy:
     name = "local_whisper"
 
     def __init__(self, transcriber: Optional[Transcriber] = None,
-                 spec: Optional[ModelSpec] = None, timeout_s: int = DEFAULT_TIMEOUT_S):
+                 spec: Optional[ModelSpec] = None, timeout_s: int = DEFAULT_TIMEOUT_S,
+                 use_process: bool = False):
         self.transcriber = transcriber or faster_whisper_transcriber
         self.spec = spec or ModelSpec()
         self.timeout_s = timeout_s
+        # use_process=True runs ASR in a killable child process (real cancellation /
+        # timeout that actually stops compute) — the batch-UI worker sets this. Default
+        # False keeps the lightweight in-thread path for single local pulls and tests.
+        self.use_process = use_process
+
+    async def _transcribe(self, media_path: str, languages: list[str]) -> "ASRResult":
+        """Run the transcriber under the request timeout. In-process by default; in a
+        killable child process when use_process is set (timeout genuinely frees the box)."""
+        if self.use_process:
+            from ..cancellable import run_in_process
+            return await asyncio.to_thread(
+                run_in_process, self.transcriber,
+                (media_path, languages, self.spec), self.timeout_s)
+        return await asyncio.wait_for(
+            asyncio.to_thread(self.transcriber, media_path, languages, self.spec),
+            timeout=self.timeout_s)
 
     def applicable(self, ref: VideoRef, policy: Policy) -> bool:
         if "local_whisper" not in policy.enabled_strategies or policy.mode == "captions-only":
@@ -102,11 +119,8 @@ class LocalWhisperStrategy:
         sem = GPU_SEM if self.spec.device == "cuda" else CPU_SEM
         try:
             async with sem:
-                asr: ASRResult = await asyncio.wait_for(
-                    asyncio.to_thread(self.transcriber, media_path, list(policy.languages), self.spec),
-                    timeout=self.timeout_s,
-                )
-        except asyncio.TimeoutError:
+                asr: ASRResult = await self._transcribe(media_path, list(policy.languages))
+        except (asyncio.TimeoutError, TimeoutError):
             return self._fail(ref, Reason.timeout, t0)
         except ModelUnavailable:
             return self._fail(ref, Reason.missing_dependency, t0)
