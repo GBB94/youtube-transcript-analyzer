@@ -1,6 +1,10 @@
-"""Stubs for strategies still to be built (Phase 5+). Importable so the registry
-is complete; raise NotImplementedError until built. api_captions/ytdlp_subs/
-local_whisper are now real modules (see their files)."""
+"""Base for strategies still to be built. Importable so the registry can stay
+complete; raises NotImplementedError until built.
+
+As of Phase 5 no strategy stubs remain: uploaded_caption (P1), api_captions (P2),
+ytdlp_subs (P3), local_whisper (P4) and the managed_* trio (P5) are all real
+modules. `_Unbuilt` stays as the base for any future stubbed strategy so the
+contract is consistent when one is added."""
 from __future__ import annotations
 
 from ..policy import Policy
@@ -16,23 +20,3 @@ class _Unbuilt:
 
     async def fetch(self, ref: VideoRef, policy: Policy) -> Result:
         raise NotImplementedError(f"{self.name} is a Phase {self.phase} strategy")
-
-
-class ManagedNativeStrategy(_Unbuilt):
-    """Phase 5 — managed provider, captions-only/native mode (must not silently
-    bill paid ASR). Additional capacity, not 'blocking-proof'."""
-    name = "managed_native"
-    phase = "5"
-
-
-class ManagedAsrStrategy(_Unbuilt):
-    """Phase 5 — managed ASR over acquired media. provenance=managed_asr."""
-    name = "managed_asr"
-    phase = "5"
-
-
-class ManagedUrlToAsrStrategy(_Unbuilt):
-    """Phase 5 — COMPOUND: provider takes a URL and returns a transcript with no
-    intermediate local media artifact."""
-    name = "managed_url_to_asr"
-    phase = "5"

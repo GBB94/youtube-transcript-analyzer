@@ -1210,6 +1210,9 @@ dev = [
 discovery = [
     { name = "google-api-python-client" },
 ]
+managed = [
+    { name = "httpx" },
+]
 media = [
     { name = "yt-dlp" },
 ]
@@ -1218,6 +1221,7 @@ media = [
 requires-dist = [
     { name = "faster-whisper", marker = "extra == 'asr'", specifier = ">=1.0" },
     { name = "google-api-python-client", marker = "extra == 'discovery'", specifier = ">=2.0" },
+    { name = "httpx", marker = "extra == 'managed'", specifier = ">=0.27" },
     { name = "jiwer", marker = "extra == 'asr-test'", specifier = ">=3.0" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -1225,7 +1229,7 @@ requires-dist = [
     { name = "youtube-transcript-api", marker = "extra == 'captions'", specifier = ">=0.6" },
     { name = "yt-dlp", marker = "extra == 'media'", specifier = ">=2025.11.12" },
 ]
-provides-extras = ["captions", "media", "asr", "asr-test", "discovery", "cli", "dev"]
+provides-extras = ["captions", "media", "asr", "asr-test", "managed", "discovery", "cli", "dev"]
 
 [[package]]
 name = "typer"

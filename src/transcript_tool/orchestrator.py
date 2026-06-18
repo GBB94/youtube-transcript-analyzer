@@ -22,7 +22,9 @@ from .strategies.uploaded_caption import UploadedCaptionStrategy
 from .strategies.api_captions import ApiCaptionsStrategy
 from .strategies.ytdlp_subs import YtdlpSubsStrategy
 from .strategies.local_whisper import LocalWhisperStrategy
-from .strategies import _stubs
+from .strategies.managed import (
+    ManagedNativeStrategy, ManagedAsrStrategy, ManagedUrlToAsrStrategy,
+)
 
 # Registry: name -> strategy instance. Order is resolved per-request from policy.
 REGISTRY: dict[str, Strategy] = {
@@ -30,9 +32,9 @@ REGISTRY: dict[str, Strategy] = {
     "api_captions": ApiCaptionsStrategy(),           # Phase 2
     "ytdlp_subs": YtdlpSubsStrategy(),               # Phase 3
     "local_whisper": LocalWhisperStrategy(),         # Phase 4
-    "managed_native": _stubs.ManagedNativeStrategy(),       # Phase 5
-    "managed_asr": _stubs.ManagedAsrStrategy(),             # Phase 5
-    "managed_url_to_asr": _stubs.ManagedUrlToAsrStrategy(), # Phase 5
+    "managed_native": ManagedNativeStrategy(),       # Phase 5
+    "managed_asr": ManagedAsrStrategy(),             # Phase 5
+    "managed_url_to_asr": ManagedUrlToAsrStrategy(), # Phase 5
 }
 
 

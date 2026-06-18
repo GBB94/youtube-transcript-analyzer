@@ -30,11 +30,16 @@ def build_subprocess_args(binary: str, flags: Sequence[str],
 
 
 _SECRET = re.compile(r"(?i)(token|key|secret|cookie|authorization)=([^&\s]+)")
+# `Authorization: Bearer <token>` / `Bearer <token>` — the header form the managed
+# HTTP client actually sends; the space after "Bearer" otherwise leaks the token.
+_BEARER = re.compile(r"(?i)\bBearer\s+\S+")
 
 
 def redact(text: str) -> str:
-    """Redact obvious secrets and provider request IDs from anything logged."""
-    return _SECRET.sub(r"\1=<redacted>", text)
+    """Redact obvious secrets, bearer tokens, and provider request IDs from logs.
+    Bearer first: otherwise `authorization=Bearer <tok>` redacts only up to the
+    space and leaks the token."""
+    return _SECRET.sub(r"\1=<redacted>", _BEARER.sub("Bearer <redacted>", text))
 
 
 def safe_temp_name(content_hash: str) -> str:
