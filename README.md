@@ -11,9 +11,10 @@ audio ASR as the floor.
 pip install -e ".[web]"
 transcript serve            # http://127.0.0.1:8000
 ```
-Paste YouTube links → review → download one Markdown file. Captions-first, local, and
-private. Scope + build phases: `docs/UI_SCOPE.md`. (UI-1: synchronous paste→Markdown;
-the SQLite job model + worker + live SSE updates land in UI-2+.)
+Paste YouTube links → live per-row progress → download one Markdown file. Captions-first,
+local, and private. Durable SQLite jobs (refresh-survivable), a separate worker process,
+and live SSE updates. Scope + build phases: `docs/UI_SCOPE.md`. (Retry/cancel, ASR opt-in
+with a cost line, and the full accessibility pass are UI-4.)
 
 ## Quickstart
 ```

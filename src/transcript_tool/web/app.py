@@ -1,54 +1,61 @@
-"""FastAPI app (UI-1). Server-rendered (Jinja + HTMX). Paste -> validate (client+server)
--> synchronous small-batch pull (captions-first) -> one Markdown file.
+"""FastAPI app (UI-2). Server-rendered (Jinja + HTMX). Paste -> validate -> a durable
+job whose items are transcribed by a SEPARATE worker process, with live per-row updates
+streamed over SSE. A refresh re-renders current state from SQLite; one failed item never
+blocks the rest; the Markdown download assembles whatever has completed so far.
 
-The transcription call is injected (`pull`) so tests run with a fake and never touch the
-network; the default pulls captions-first via the engine. The SQLite job model, worker
-process, and SSE arrive in UI-2+. ASR opt-in is UI-4 — UI-1 is captions-only."""
+`run_worker` is injectable so tests drive processing deterministically (in-process with a
+fake pull) instead of spawning; the default spawns a child worker process."""
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from ..schema import Outcome, Reason, Result
-from .copy import badge_for, message_for, retry_allowed
-from .markdown import Record, render
-from .parse import Target, parse_targets
+from . import markdown as md
+from .jobs import JobStore, STATUS_COMPLETE, STATUS_FAILED
+from .parse import parse_targets
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-MAX_BATCH = 25                      # UI-1 is synchronous; bigger batches wait for UI-2's worker
+MAX_BATCH = 50
+DEFAULT_DB = str(Path("~/.cache/transcript-tool/web-jobs.sqlite").expanduser())
 
-PullFn = Callable[[Target], Result]
+RunWorker = Callable[[str], None]       # (job_id) -> launch processing
 
 
-def _default_pull(target: Target) -> Result:
-    """Captions-first pull via the engine. Public-URL egress is enabled because running
-    the local app and pasting links IS the operator's acknowledgment (UI-4 turns this
-    into a revocable one-time setting). No ASR in UI-1."""
-    from ..cache import Cache
-    from ..orchestrator import get_transcript_sync
-    from ..policy import EgressPolicy, Policy
-    app_cache = Cache(Path("~/.cache/transcript-tool").expanduser())
-    policy = Policy(
-        enabled_strategies=("api_captions", "ytdlp_subs"),
-        egress=EgressPolicy(allow_network=True, allow_public_url=True),
-    )
-    return get_transcript_sync(target.ref(), policy, app_cache)
+def _spawn_worker(db_path: str) -> RunWorker:
+    def run(job_id: str) -> None:
+        import multiprocessing as mp
+        from .worker import process_job
+        ctx = mp.get_context("spawn")
+        ctx.Process(target=process_job, args=(db_path, job_id), daemon=True).start()
+    return run
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def create_app(pull: Optional[PullFn] = None, max_batch: int = MAX_BATCH) -> FastAPI:
+def _row_payload(item: dict) -> dict:
+    ok = item["status"] == STATUS_COMPLETE
+    return {"idx": item["idx"], "status": item["status"], "ok": ok,
+            "badge": item["badge"], "message": item["message"] or "",
+            "retry": bool(item["retry"]), "words": item["words"] or 0, "url": item["url"]}
+
+
+def create_app(db_path: Optional[str] = None, run_worker: Optional[RunWorker] = None) -> FastAPI:
     app = FastAPI(title="Batch Transcripts")
-    app.state.pull = pull or _default_pull
-    app.state.results = {}            # token -> {"markdown": str, "rows": [...]}
+    db_path = db_path or DEFAULT_DB
+    Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    store = JobStore(db_path)
+    app.state.store = store
+    app.state.run_worker = run_worker or _spawn_worker(db_path)
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
@@ -56,57 +63,70 @@ def create_app(pull: Optional[PullFn] = None, max_batch: int = MAX_BATCH) -> Fas
 
     @app.post("/validate", response_class=HTMLResponse)
     def validate(request: Request, links: str = Form("")):
-        parsed = parse_targets(links)
-        return _TEMPLATES.TemplateResponse(request, "_validation.html", {"parsed": parsed})
+        return _TEMPLATES.TemplateResponse(request, "_validation.html",
+                                           {"parsed": parse_targets(links)})
 
-    @app.post("/transcribe", response_class=HTMLResponse)
+    @app.post("/transcribe")
     def transcribe(request: Request, links: str = Form("")):
         parsed = parse_targets(links)
         if not parsed.valid:
             return _TEMPLATES.TemplateResponse(
-                request, "results.html",
-                {"error": "No valid YouTube links to transcribe.",
-                 "rows": [], "token": None, "parsed": parsed})
-        if len(parsed.valid) > max_batch:
+                request, "job.html",
+                {"error": "No valid YouTube links to transcribe.", "rows": [], "job_id": None})
+        if len(parsed.valid) > MAX_BATCH:
             return _TEMPLATES.TemplateResponse(
-                request, "results.html",
-                {"rows": [], "token": None, "parsed": parsed,
-                 "error": f"UI-1 runs synchronously — keep it to {max_batch} links per batch."})
+                request, "job.html",
+                {"error": f"Keep it to {MAX_BATCH} links per batch.", "rows": [], "job_id": None})
+        job_id = uuid.uuid4().hex
+        store.create_job(job_id, _now_iso(), ["en"], parsed.valid)
+        app.state.run_worker(job_id)        # separate worker process picks it up
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
-        pull_fn: PullFn = app.state.pull
-        records: list[Record] = []
-        rows = []
-        for t in parsed.valid:
-            try:
-                result = pull_fn(t)
-            except Exception:  # never let one link break the batch
-                result = Result.make_failed(t.ref(), Reason.provider_error)
-            records.append(Record(target=t, result=result))
-            ok = result.outcome is Outcome.success
-            rows.append({
-                "url": t.url, "video_id": t.video_id, "ok": ok,
-                "badge": badge_for(result) if ok else None,
-                "message": "" if ok else message_for(result),
-                "retry": (not ok) and retry_allowed(result),
-                "words": result.word_count if ok else 0,
-            })
-
-        token = uuid.uuid4().hex
-        markdown = render(records, language_preferences=["en"], generated_at=_now_iso())
-        app.state.results[token] = {"markdown": markdown, "rows": rows}
-        n_ok = sum(1 for r in rows if r["ok"])
+    @app.get("/jobs/{job_id}", response_class=HTMLResponse)
+    def job_page(request: Request, job_id: str):
+        if store.get_job(job_id) is None:
+            return _TEMPLATES.TemplateResponse(
+                request, "job.html", {"error": "Unknown job.", "rows": [], "job_id": None})
+        items = store.get_items(job_id)         # current state -> refresh survives
+        counts = store.counts(job_id)
         return _TEMPLATES.TemplateResponse(
-            request, "results.html",
-            {"rows": rows, "token": token,
-             "n_ok": n_ok, "n_total": len(rows), "error": None})
+            request, "job.html",
+            {"error": None, "job_id": job_id, "rows": [_row_payload(i) for i in items],
+             "n_ok": counts["complete"], "n_total": counts["total"]})
 
-    @app.get("/download/{token}.md")
-    def download(token: str):
-        entry = app.state.results.get(token)
-        if not entry:
-            return PlainTextResponse("Unknown or expired download.", status_code=404)
+    @app.get("/jobs/{job_id}/events")
+    def job_events(job_id: str):
+        async def gen():
+            last: dict[int, tuple] = {}
+            while True:
+                items = store.get_items(job_id)
+                for it in items:
+                    sig = (it["status"], it["badge"], it["message"])
+                    if last.get(it["idx"]) != sig:
+                        last[it["idx"]] = sig
+                        yield f"event: item\ndata: {json.dumps(_row_payload(it))}\n\n"
+                counts = store.counts(job_id)
+                yield f"event: counts\ndata: {json.dumps(counts)}\n\n"
+                if counts["finished"]:
+                    yield "event: done\ndata: {}\n\n"
+                    return
+                await asyncio.sleep(0.3)
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.get("/jobs/{job_id}/transcripts.md")
+    def download(job_id: str):
+        job = store.get_job(job_id)
+        if job is None:
+            return PlainTextResponse("Unknown job.", status_code=404)
+        items = store.get_items(job_id)
+        sections = [it["md_section"] for it in items
+                    if it["status"] == STATUS_COMPLETE and it["md_section"]]
+        failures = [(it["url"], it["message"] or "Did not complete.")
+                    for it in items if it["status"] == STATUS_FAILED]
+        document = md.assemble(job["created_at"], job["languages"].split(","),
+                               len(items), sections, failures)
         return PlainTextResponse(
-            entry["markdown"], media_type="text/markdown",
+            document, media_type="text/markdown",
             headers={"Content-Disposition": 'attachment; filename="transcripts.md"'})
 
     return app

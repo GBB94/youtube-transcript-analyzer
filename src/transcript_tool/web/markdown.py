@@ -65,6 +65,37 @@ def _video_section(rec: Record) -> str:
     return "\n".join(lines)
 
 
+def video_section(target: Target, result: Result) -> str:
+    """Public single-item renderer — the worker stores this per completed item so the
+    download endpoint can assemble a partial document without holding Result objects."""
+    return _video_section(Record(target=target, result=result))
+
+
+def assemble(generated_at: str, language_preferences: list[str], videos_requested: int,
+             sections: list[str], failures: list[tuple[str, str]]) -> str:
+    """Build the document from pre-rendered success sections (in order) and
+    (url, message) failures. Used by the durable job path (UI-2); succeeded/failed
+    reflect what's done so far, so a partial download is honest."""
+    fm = [
+        "---",
+        f"generated_at: {generated_at}",
+        f"videos_requested: {videos_requested}",
+        f"videos_succeeded: {len(sections)}",
+        f"videos_failed: {len(failures)}",
+        f"language_preferences: [{', '.join(language_preferences)}]",
+        "---",
+        "",
+        "# Video Transcripts",
+    ]
+    parts = ["\n".join(fm)] + list(sections)
+    if failures:
+        lines = ["## Items that could not be transcribed"]
+        for url, message in failures:
+            lines.append(f"- {url}\n  - Reason: {message}")
+        parts.append("\n".join(lines))
+    return "\n\n---\n\n".join(parts) + "\n"
+
+
 def render(records: list[Record], language_preferences: list[str],
            generated_at: str) -> str:
     succeeded = [rec for rec in records if rec.result and rec.result.outcome is Outcome.success]

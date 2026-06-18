@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch Transcripts — Job</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    .row { padding: .5rem 0; border-bottom: 1px solid #eee; display: flex; gap: .6rem; align-items: baseline; }
+    .badge { background: #e7f0ff; color: #1b4fa0; border-radius: 4px; padding: .1rem .4rem; font-size: .8rem; }
+    .state { color: #555; }
+    .fail { color: #b00020; }
+    .vid { color: #888; font-size: .85rem; margin-left: auto; }
+    .err { color: #b00020; }
+    a.download { display: inline-block; margin: 1rem 0; padding: .6rem 1rem; background: #1b4fa0; color: #fff; text-decoration: none; border-radius: 6px; }
+    a.download[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Results</h1>
+  {% if error %}
+    <p class="err">{{ error }}</p>
+  {% else %}
+    <p id="progress" role="status" aria-live="polite">{{ n_ok }} of {{ n_total }} complete.</p>
+    <a id="download" class="download" href="/jobs/{{ job_id }}/transcripts.md" {% if n_ok == 0 %}hidden{% endif %}>Download Markdown</a>
+    <div id="rows">
+      {% for row in rows %}
+        <div class="row" id="row-{{ row.idx }}">
+          {% if row.ok %}
+            <span class="badge">{{ row.badge }}</span><span class="state">{{ row.words }} words</span>
+          {% elif row.status == 'failed' %}
+            <span class="fail">Failed — {{ row.message }}{% if row.retry %} (retryable){% endif %}</span>
+          {% else %}
+            <span class="state">{{ 'Fetching captions…' if row.status == 'running' else 'Queued' }}</span>
+          {% endif %}
+          <span class="vid">{{ row.url }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  <p><a href="/">← New batch</a></p>
+
+  {% if job_id %}
+  <script>
+    const jobId = {{ job_id|tojson }};
+    const es = new EventSource(`/jobs/${jobId}/events`);
+    function label(d) {
+      if (d.ok) return `<span class="badge">${d.badge}</span><span class="state">${d.words} words</span>`;
+      if (d.status === 'failed') return `<span class="fail">Failed — ${d.message}${d.retry ? ' (retryable)' : ''}</span>`;
+      return `<span class="state">${d.status === 'running' ? 'Fetching captions…' : 'Queued'}</span>`;
+    }
+    es.addEventListener('item', e => {
+      const d = JSON.parse(e.data);
+      const row = document.getElementById(`row-${d.idx}`);
+      if (row) row.innerHTML = label(d) + `<span class="vid">${d.url}</span>`;
+    });
+    es.addEventListener('counts', e => {
+      const c = JSON.parse(e.data);
+      document.getElementById('progress').textContent = `${c.complete} of ${c.total} complete.`;
+      if (c.complete > 0) document.getElementById('download').hidden = false;
+    });
+    es.addEventListener('done', () => es.close());
+  </script>
+  {% endif %}
+</body>
+</html>
