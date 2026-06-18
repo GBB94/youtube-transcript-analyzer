@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -30,11 +31,18 @@ CAPTION_SUFFIXES = {".vtt", ".srt"}
 AUDIO_SUFFIXES = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".mp4", ".mkv", ".webm", ".mov"}
 
 
+_YT_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_URL_STRATEGIES = ("api_captions", "ytdlp_subs", "local_whisper")
+
+
 def _classify_target(target: str):
-    """Return (VideoRef, default_strategies) for a file path or URL."""
+    """Return (VideoRef, default_strategies) for a file path, URL, or bare YouTube id
+    (what `find --format ids` emits, so the pipe round-trips)."""
     if target.startswith("http://") or target.startswith("https://"):
-        return (VideoRef(platform="youtube", source="url", url=target),
-                ("api_captions", "ytdlp_subs", "local_whisper"))
+        return (VideoRef(platform="youtube", source="url", url=target), _URL_STRATEGIES)
+    if _YT_ID.match(target) and not Path(target).exists():
+        url = f"https://www.youtube.com/watch?v={target}"
+        return (VideoRef(platform="youtube", id=target, source="url", url=url), _URL_STRATEGIES)
     p = Path(target).expanduser()
     suffix = p.suffix.lower()
     ref = VideoRef(platform="local", source="uploaded_file", path=str(p))
@@ -43,28 +51,23 @@ def _classify_target(target: str):
     return ref, ("uploaded_caption",)
 
 
-def cmd_pull(args: argparse.Namespace) -> int:
-    ref, strategies = _classify_target(args.target)
+def _pull_one(target: str, args: argparse.Namespace, cache) -> int:
+    """Process a single target; emit its Result JSON to stdout. Returns the per-item
+    exit code (0 success, 1 non-success, 2 usage/gating)."""
+    ref, strategies = _classify_target(target)
     if args.strategies:
         strategies = tuple(args.strategies)
-    egress = EgressPolicy(
-        allow_network=ref.source == "url",
-        allow_public_url=args.enable_public_url,
-    )
-    policy = Policy(
-        mode=args.policy,
-        languages=tuple(args.lang),
-        enabled_strategies=strategies,
-        egress=egress,
-    )
-    cache = None if args.force else Cache(Path(args.cache_dir).expanduser())
+    egress = EgressPolicy(allow_network=ref.source == "url",
+                          allow_public_url=args.enable_public_url)
+    policy = Policy(mode=args.policy, languages=tuple(args.lang),
+                    enabled_strategies=strategies, egress=egress)
 
     if ref.source == "url" and not args.enable_public_url:
-        _log("error: public-URL extraction is a gated capability. "
-             "Pass --enable-public-url to acknowledge the policy decision (see DESIGN.md §4).")
+        _log(f"skip {target}: public-URL extraction is gated; pass --enable-public-url "
+             "(see DESIGN.md §4).")
         return 2
     if ref.source == "uploaded_file" and not Path(ref.path).exists():
-        _log(f"error: no such file: {ref.path}")
+        _log(f"skip {target}: no such file")
         return 2
 
     label = ref.url or Path(ref.path).name
@@ -77,10 +80,77 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return 0 if result.outcome.value == "success" else 1
 
 
+def _read_targets(file_arg: str) -> list[str]:
+    """One target per line from a file, or stdin when '-'. Blank lines / '#' comments
+    are ignored, so `find --format ids | pull --file -` round-trips cleanly."""
+    text = sys.stdin.read() if file_arg == "-" else Path(file_arg).expanduser().read_text()
+    return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    cache = None if args.force else Cache(Path(args.cache_dir).expanduser())
+
+    if args.file:
+        targets = _read_targets(args.file)
+        if not targets:
+            _log("error: --file contained no targets")
+            return 2
+        worst = 0
+        for t in targets:
+            worst = max(worst, _pull_one(t, args, cache))
+        return 1 if worst == 1 else (0 if worst == 0 else 2)
+
+    if not args.target:
+        _log("error: provide a target, or --file <path|-> for batch input")
+        return 2
+    return _pull_one(args.target, args, cache)
+
+
 def cmd_find(args: argparse.Namespace) -> int:
-    _log("find: discovery is a Phase 6 capability (YouTube Data API, dual-bucket quota).")
-    _log("      `--format ids` will emit one id per line for `pull --file -`.")
-    return 3
+    """Discovery via the authorized YouTube Data API. Emits VideoRef ids/JSONL to
+    stdout (pipeable into `pull --file -`); budget estimate + errors to stderr."""
+    import os
+    from .discover import (
+        DiscoveryResult, GoogleApiClient, QuotaExceeded, QuotaTracker,
+        channel_uploads, search_query,
+    )
+
+    if not args.channel and not args.query:
+        _log("error: provide --channel <id|@handle> or --query \"<text>\"")
+        return 2
+
+    api_key = os.environ.get("YOUTUBE_API_KEY")
+    if not api_key:
+        _log("error: YOUTUBE_API_KEY is not set (discovery uses the YouTube Data API).")
+        return 2
+
+    client = GoogleApiClient(api_key)
+    quota = QuotaTracker()
+    cache = Cache(Path(args.cache_dir).expanduser())
+
+    try:
+        if args.channel:
+            result: DiscoveryResult = channel_uploads(
+                client, quota, args.channel, max_n=args.max,
+                include_shorts=not args.no_shorts, include_live=not args.no_live, cache=cache)
+        else:
+            result = search_query(client, quota, args.query, max_n=args.max, order=args.order,
+                                  region_code=args.region, relevance_language=args.relevance_language)
+    except QuotaExceeded as qe:
+        _log(f"error: quota exceeded for the '{qe.bucket}' bucket "
+             f"(estimate: {quota.remaining()}). Prefer channel/playlist traversal over search.")
+        return 4
+
+    for v in result.videos:
+        if args.format == "ids":
+            print(v.ref.id, file=sys.stdout)
+        else:
+            _emit(v.as_dict())
+
+    if result.stability:
+        _log(f"find: search params (results are not stable) = {result.stability}")
+    _log(f"find: {len(result.videos)} videos | estimated quota remaining = {quota.remaining()}")
+    return 0
 
 
 def _have_module(name: str) -> bool:
@@ -162,7 +232,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pull = sub.add_parser("pull", help="produce a transcript from a caption/audio file or URL")
-    pull.add_argument("target", help="path to a .vtt/.srt/audio file, or an http(s) URL")
+    pull.add_argument("target", nargs="?", help="path to a .vtt/.srt/audio file, or an http(s) URL")
+    pull.add_argument("--file", help="batch: read one target per line from a file, or '-' for stdin "
+                                     "(pipe from `find --format ids`)")
     pull.add_argument("--policy", choices=["captions-only", "prefer-captions", "asr-only"],
                       default="prefer-captions")
     pull.add_argument("--lang", nargs="+", default=["en"])
@@ -172,11 +244,16 @@ def build_parser() -> argparse.ArgumentParser:
     pull.add_argument("--force", action="store_true", help="bypass cache")
     pull.set_defaults(func=cmd_pull)
 
-    find = sub.add_parser("find", help="discover videos (Phase 6)")
-    find.add_argument("--channel")
-    find.add_argument("--query")
+    find = sub.add_parser("find", help="discover videos via the YouTube Data API (Phase 6)")
+    find.add_argument("--channel", help="channel id (UC…) or @handle to traverse uploads")
+    find.add_argument("--query", help="search query (uses the scarce search-quota bucket)")
     find.add_argument("--max", type=int, default=25)
     find.add_argument("--format", choices=["ids", "jsonl"], default="ids")
+    find.add_argument("--no-shorts", action="store_true", help="exclude Shorts (<=60s) from a channel")
+    find.add_argument("--no-live", action="store_true", help="exclude live/upcoming/past livestreams")
+    find.add_argument("--order", default="relevance", help="search order (relevance/date/viewCount/…)")
+    find.add_argument("--region", help="search regionCode (persisted for result stability)")
+    find.add_argument("--relevance-language", help="search relevanceLanguage (persisted)")
     find.set_defaults(func=cmd_find)
 
     doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")

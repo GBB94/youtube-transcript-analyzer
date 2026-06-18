@@ -89,9 +89,11 @@ src/transcript_tool/
     base.py            # Strategy protocol
     uploaded_caption.py  # P1   api_captions.py  # P2
     ytdlp_subs.py        # P3   local_whisper.py # P4
-    _stubs.py            # managed_* (P5)
+    managed.py           # managed_native/asr/url_to_asr (P5)
+    _stubs.py            # _Unbuilt base (no stubs left as of P5)
   asr_eval.py        # jiwer regression harness (P4)
   media.py           # yt-dlp audio acquisition for URL->ASR (live-only)
+  discover.py        # YouTube Data API discovery + dual-bucket quota (P6)
 tests/             # pytest; golden VTT fixtures govern dedup
 docs/DESIGN.md     # the authoritative v3 spec
 docs/PHASE_1_BUILD.md  # the current task
@@ -106,19 +108,23 @@ transcript doctor
 ```
 
 ## What's built vs stubbed
-- **Built (Phases 1–4):** schema/outcome model, policy + policy_hash, preflight,
+- **Built (Phases 1–6):** schema/outcome model, policy + policy_hash, preflight,
   normalization + dedup (fixture-tested), source-aware quality gates, two-layer
-  cache with the full lifecycle contract, orchestrator + singleflight, sync guard,
-  CLI (`pull` handles caption files, audio files, and gated URLs).
+  cache + a separate metadata store (≤30-day TTL), orchestrator + singleflight,
+  sync guard, CLI (`pull` handles caption/audio files, gated URLs, bare YouTube ids,
+  and `--file -` batch; `find`; `doctor`).
   - `uploaded_caption` (P1), `api_captions` (P2, youtube-transcript-api),
     `ytdlp_subs` (P3, yt-dlp), `local_whisper` (P4, faster-whisper) + the `jiwer`
     regression harness (`asr_eval.py`) + model provisioning contract.
-  - All strategies are unit-tested via **dependency injection** (fake client /
-    runner / transcriber); the live YouTube and real-model paths are verified on a
-    real machine, not in CI.
-- **Stubbed (raise `NotImplementedError`, with contract docstrings):**
-  `managed_native` / `managed_asr` / `managed_url_to_asr` (P5), discovery (P6),
-  server profile (P7), hardening suites (P8).
+  - `managed_native` / `managed_asr` / `managed_url_to_asr` (P5) — generic provider
+    adapter over an injectable HTTP client; key-gated, egress-gated, structured Cost.
+  - Discovery (P6) — `discover.py`: channel/playlist traversal, query search, handle
+    resolution, batched enrichment, **dual-bucket quota** (search vs general pool).
+  - All network/model strategies are unit-tested via **dependency injection** (fake
+    client / runner / transcriber); the live YouTube and real-model paths (P2–P4)
+    were verified on a real machine, not in CI.
+- **Stubbed (with contract docstrings):** the `server` deployment profile (P7) and
+  the failure-injection / canary / security hardening suites (P8).
 
 > Public-URL strategies (`api_captions`, `ytdlp_subs`, and `local_whisper` from a
 > URL) are gated by `EgressPolicy.allow_public_url` and the CLI's

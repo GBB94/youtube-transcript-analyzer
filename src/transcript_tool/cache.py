@@ -49,12 +49,19 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Discovery metadata (Phase 6) lives in its OWN store with its own refresh policy.
+# YouTube developer policy requires non-authorized API metadata to be refreshed or
+# deleted within ~30 days, so this never goes in the request-result cache.
+DEFAULT_METADATA_TTL = 30 * 24 * 3600
+
+
 class Cache:
     def __init__(self, root: Path):
         self.root = Path(root)
         (self.root / "results").mkdir(parents=True, exist_ok=True)
         (self.root / "artifacts").mkdir(parents=True, exist_ok=True)
         (self.root / "locks").mkdir(parents=True, exist_ok=True)
+        (self.root / "metadata").mkdir(parents=True, exist_ok=True)
 
     # ---- keys ---------------------------------------------------------------
 
@@ -65,8 +72,47 @@ class Cache:
         raw = "|".join([canonical_source, policy_hash, normalizer_version, schema_version])
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
+    @staticmethod
+    def metadata_key(*parts: str) -> str:
+        import hashlib
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
+
     def _result_path(self, key: str) -> Path:
         return self.root / "results" / f"{key}.json"
+
+    # ---- metadata store (Phase 6 discovery; separate refresh policy) ---------
+
+    def _metadata_path(self, key: str) -> Path:
+        return self.root / "metadata" / f"{key}.json"
+
+    def get_metadata(self, key: str) -> Optional[dict]:
+        """Return cached discovery metadata, or None on miss / expiry / corruption.
+        Honors a <=30-day TTL; an expired or unreadable entry is removed."""
+        path = self._metadata_path(key)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            self._safe_unlink(path)
+            return None
+        expires_at = data.get("_expires_at")
+        if expires_at and _utcnow().timestamp() > expires_at:
+            self._safe_unlink(path)
+            return None
+        return data.get("value")
+
+    def put_metadata(self, key: str, value: dict, ttl: int = DEFAULT_METADATA_TTL) -> None:
+        """Store discovery metadata with a bounded TTL (default 30 days). The TTL is
+        clamped to the policy maximum so retention can't silently exceed it."""
+        ttl = min(ttl, DEFAULT_METADATA_TTL)
+        now = _utcnow()
+        payload = {
+            "_cached_at": now.isoformat(),
+            "_expires_at": (now + timedelta(seconds=ttl)).timestamp(),
+            "value": value,
+        }
+        self._atomic_write(self._metadata_path(key), json.dumps(payload))
 
     def _artifact_exists(self, ref: Optional[str]) -> bool:
         if not ref:

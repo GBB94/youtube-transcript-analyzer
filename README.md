@@ -27,8 +27,13 @@ macOS ARM (CPU).**
 - **Phase 4 (`local_whisper`, faster-whisper)** — unit-tested with a fake
   transcriber **and** verified end-to-end against the real `small` model on real
   audio (lazy local-only load, no mid-request download).
-- **Phases 5–8** (managed providers, discovery, server profile, hardening suites)
-  are stubbed with contract docstrings. See `docs/DESIGN.md §16`.
+- **Phase 5 (managed providers: `managed_native` / `managed_asr` / `managed_url_to_asr`)**
+  and **Phase 6 (discovery / `find`)** — implemented and unit-tested via injected
+  clients against recorded fixtures (no live network / quota in CI). Live verification
+  against a real managed provider and the YouTube Data API is **pending** (needs
+  `MANAGED_API_KEY` / `YOUTUBE_API_KEY`). See `docs/PHASE_5_6_BUILD.md`.
+- **Phases 7–8** (server profile, failure-injection / canary / hardening suites) are
+  stubbed with contract docstrings. See `docs/DESIGN.md §16`.
 
 Verification is environment-specific: the unit suite is the portable guarantee
 (`pytest -q`); the live/real-model paths depend on local runtime deps. Run
