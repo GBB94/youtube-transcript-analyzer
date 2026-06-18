@@ -8,11 +8,17 @@ this module is the swappable interface plus the local implementation.
 """
 from __future__ import annotations
 
+import errno
+import fcntl
 import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import Iterator, Optional, Protocol
+
+
+class LockTimeout(RuntimeError):
+    """Could not acquire the lock within the configured timeout."""
 
 
 class LockBackend(Protocol):
@@ -24,30 +30,57 @@ class LockBackend(Protocol):
 
 
 class FileLockBackend:
-    """Local profile: atomic O_EXCL create + brief spin. Works across processes on a
-    shared filesystem, but not across hosts — that's the server backend's job."""
-    def __init__(self, lock_dir: Path, poll_seconds: float = 0.05):
+    """Local profile: an `fcntl.flock` advisory lock held on an open fd.
+
+    Why flock and not an O_EXCL marker file: an O_EXCL lock file left behind by a
+    process that **died holding it** is a permanent stale lock — every future acquirer
+    spins forever. A batch with duplicate links + multiple concurrent requests for the
+    same video is the worst case (see UI scope §7). An flock is owned by the open file
+    description and is **released automatically by the kernel when the process dies**,
+    so a crashed holder never wedges the key. The lock file itself is just a handle and
+    may safely persist on disk.
+
+    `timeout` (seconds) bounds the wait so a live-but-stuck holder surfaces as a
+    LockTimeout instead of an indefinite hang; None blocks until acquired.
+    """
+    def __init__(self, lock_dir: Path, poll_seconds: float = 0.02,
+                 timeout: Optional[float] = 120.0):
         self.lock_dir = Path(lock_dir)
         self.lock_dir.mkdir(parents=True, exist_ok=True)
         self.poll_seconds = poll_seconds
+        self.timeout = timeout
 
     @contextmanager
     def lock(self, key: str) -> Iterator[None]:
         lock_path = self.lock_dir / f"{key}.lock"
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            self._acquire(fd, key)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+        finally:
+            os.close(fd)
+
+    def _acquire(self, fd: int, key: str) -> None:
+        if self.timeout is None:
+            fcntl.flock(fd, fcntl.LOCK_EX)          # block until acquired
+            return
+        deadline = time.monotonic() + self.timeout
         while True:
             try:
-                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
-                break
-            except FileExistsError:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except OSError as e:
+                if e.errno not in (errno.EAGAIN, errno.EACCES):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise LockTimeout(f"timed out acquiring lock for {key!r}")
                 time.sleep(self.poll_seconds)
-        try:
-            yield
-        finally:
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
 
 
 class SharedLockBackend:
