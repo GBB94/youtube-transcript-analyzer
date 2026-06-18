@@ -106,6 +106,35 @@ def cmd_pull(args: argparse.Namespace) -> int:
     return _pull_one(args.target, args, cache)
 
 
+def cmd_bakeoff(args: argparse.Namespace) -> int:
+    """Phase 0 reliability bakeoff: run a corpus through the real pipeline and report
+    per-path success/reason/latency/cost. Run on real hardware for the public-URL
+    paths (this sandbox is IP-blocked)."""
+    from .bakeoff import run_bakeoff
+    targets: list[str] = []
+    for line in _read_targets(args.corpus):
+        try:
+            targets.append(json.loads(line)["target"] if line.startswith("{") else line)
+        except (json.JSONDecodeError, KeyError):
+            _log(f"skip malformed corpus line: {line}")
+    if not targets:
+        _log("error: corpus had no usable targets")
+        return 2
+    # Bakeoff measures real acquisition, so it runs FRESH by default; opt into the
+    # cache only if you explicitly want to include cache-hit timings.
+    cache = Cache(Path(args.cache_dir).expanduser()) if args.use_cache else None
+    _log(f"bakeoff: {len(targets)} targets")
+    report = run_bakeoff(targets, cache=cache)
+    text = json.dumps(report, indent=2)
+    if args.out:
+        Path(args.out).expanduser().write_text(text)
+        _log(f"bakeoff: report written to {args.out} "
+             f"(overall success rate {report['overall_success_rate']})")
+    else:
+        print(text, file=sys.stdout)
+    return 0
+
+
 def cmd_find(args: argparse.Namespace) -> int:
     """Discovery via the authorized YouTube Data API. Emits VideoRef ids/JSONL to
     stdout (pipeable into `pull --file -`); budget estimate + errors to stderr."""
@@ -260,6 +289,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--strategies", nargs="+",
                         help="scope the check to these strategies (default: all built strategies)")
     doctor.set_defaults(func=cmd_doctor)
+
+    bake = sub.add_parser("bakeoff", help="run a corpus through the pipeline and report metrics (Phase 0)")
+    bake.add_argument("--corpus", required=True, help="JSONL/line corpus of targets, or '-' for stdin")
+    bake.add_argument("--out", help="write the JSON report here (default: stdout)")
+    bake.add_argument("--use-cache", action="store_true",
+                      help="include cache hits (default: run fresh to measure acquisition)")
+    bake.set_defaults(func=cmd_bakeoff)
     return p
 
 
