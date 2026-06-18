@@ -82,9 +82,12 @@ src/transcript_tool/
   quality.py       # source-aware gates (warn before reject)
   cache.py         # two-layer + metadata cache, lifecycle contract (local profile)
   orchestrator.py  # staged pipeline + singleflight; get_transcript[/_sync]
-  provisioning.py  # ASR model provisioning contract (Phase 4 stub)
+  provisioning.py  # ASR model provisioning + warm-at-startup (P4/P7)
   security.py      # subprocess/url/redaction helpers
-  cli.py           # pull / find / doctor
+  profiles.py      # local vs server profile + ResourceLimits + enforce_limit (P7)
+  locking.py       # pluggable lock backend: file (local) / shared stub (server) (P7)
+  bakeoff.py       # reliability bakeoff harness (P0)
+  cli.py           # pull / find / doctor / bakeoff
   strategies/
     base.py            # Strategy protocol
     uploaded_caption.py  # P1   api_captions.py  # P2
@@ -123,8 +126,17 @@ transcript doctor
   - All network/model strategies are unit-tested via **dependency injection** (fake
     client / runner / transcriber); the live YouTube and real-model paths (P2–P4)
     were verified on a real machine, not in CI.
-- **Stubbed (with contract docstrings):** the `server` deployment profile (P7) and
-  the failure-injection / canary / security hardening suites (P8).
+- **Seams + partial (P0/P7/P8):**
+  - P0 — `bakeoff.py` + `transcript bakeoff` (harness; real-corpus run needs real
+    hardware), `docs/COMPLIANCE.md` + `docs/SLO.md` (DRAFT — legal sign-off and the
+    real bakeoff numbers are human/hardware-gated).
+  - P7 — `profiles.py` (local/server, `ResourceLimits`, `enforce_limit`), `locking.py`
+    (pluggable backend: `FileLockBackend` local; `SharedLockBackend` is a documented
+    stub — real Redis/DB/container/cgroup is deploy-time), `provisioning.warm()`.
+    Singleflight contract is preserved across the backend (tested).
+  - P8 — `tests/test_failure_injection.py` (the fault matrix is green) +
+    `docs/SECURITY_REVIEW.md`. Live canaries and SLO-conformance vs. real numbers
+    remain infra/hardware-gated.
 
 > Public-URL strategies (`api_captions`, `ytdlp_subs`, and `local_whisper` from a
 > URL) are gated by `EgressPolicy.allow_public_url` and the CLI's

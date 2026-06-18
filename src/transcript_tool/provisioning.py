@@ -41,6 +41,19 @@ def provision(spec: ModelSpec, store_dir: str) -> str:
     return store_dir
 
 
+def warm(specs, store_dir: str, loader=None) -> int:
+    """Server profile: load each pinned model ONCE at startup so no request ever
+    triggers a load/download mid-flight (the caption-first contract). Returns the
+    number of models warmed. `loader` is injectable for tests; defaults to load_lazy,
+    which is local-only and never downloads — provision out of band first."""
+    load = loader or load_lazy
+    n = 0
+    for spec in specs:
+        load(spec, store_dir)
+        n += 1
+    return n
+
+
 def is_provisioned(spec: ModelSpec, store_dir: str) -> bool:
     """Cheap filesystem check: is the pinned model present in local-only storage?
     Does NOT load the model (that's load_lazy) and NEVER downloads. Used by

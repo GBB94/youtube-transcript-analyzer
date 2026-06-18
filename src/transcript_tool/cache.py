@@ -56,12 +56,18 @@ DEFAULT_METADATA_TTL = 30 * 24 * 3600
 
 
 class Cache:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, lock_backend=None):
         self.root = Path(root)
         (self.root / "results").mkdir(parents=True, exist_ok=True)
         (self.root / "artifacts").mkdir(parents=True, exist_ok=True)
         (self.root / "locks").mkdir(parents=True, exist_ok=True)
         (self.root / "metadata").mkdir(parents=True, exist_ok=True)
+        # Local profile defaults to a filesystem lock; the server profile injects a
+        # shared (Redis/DB) backend. The singleflight contract is identical either way.
+        if lock_backend is None:
+            from .locking import FileLockBackend
+            lock_backend = FileLockBackend(self.root / "locks")
+        self._lock_backend = lock_backend
 
     # ---- keys ---------------------------------------------------------------
 
@@ -120,26 +126,12 @@ class Cache:
         safe = ref.replace(":", "_").replace("/", "_")
         return (self.root / "artifacts" / safe).exists()
 
-    # ---- locking (local profile: filesystem lock) ---------------------------
+    # ---- locking (delegated to the pluggable backend; profile decides which) ----
 
     @contextmanager
     def lock(self, key: str) -> Iterator[None]:
-        lock_path = self.root / "locks" / f"{key}.lock"
-        # Atomic create; spin briefly. (server profile uses a real distributed lock.)
-        while True:
-            try:
-                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
-                break
-            except FileExistsError:
-                time.sleep(0.05)
-        try:
+        with self._lock_backend.lock(key):
             yield
-        finally:
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
 
     # ---- get / put ----------------------------------------------------------
 
