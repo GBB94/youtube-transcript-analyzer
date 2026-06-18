@@ -52,6 +52,15 @@ class JobStore:
         self.db_path = str(db_path)
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            self._migrate(c)
+
+    @staticmethod
+    def _migrate(c) -> None:
+        """Additive migrations for DBs created by an earlier version. CREATE TABLE
+        IF NOT EXISTS won't add new columns to a pre-existing table, so backfill them."""
+        existing = {row["name"] for row in c.execute("PRAGMA table_info(jobs)")}
+        if "asr" not in existing:
+            c.execute("ALTER TABLE jobs ADD COLUMN asr INTEGER DEFAULT 0")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
