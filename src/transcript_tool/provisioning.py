@@ -41,6 +41,16 @@ def provision(spec: ModelSpec, store_dir: str) -> str:
     return store_dir
 
 
+def is_provisioned(spec: ModelSpec, store_dir: str) -> bool:
+    """Cheap filesystem check: is the pinned model present in local-only storage?
+    Does NOT load the model (that's load_lazy) and NEVER downloads. Used by
+    `doctor` to report ASR readiness without pulling GBs into memory. faster-whisper
+    / ctranslate2 models materialize a `model.bin` weights file."""
+    from pathlib import Path
+    root = Path(store_dir).expanduser()
+    return root.exists() and any(root.rglob("model.bin"))
+
+
 def load_lazy(spec: ModelSpec, store_dir: str) -> Any:
     """Load the model into memory from local-only storage. Cached per spec.
     Raises ModelUnavailable (never downloads) if absent."""

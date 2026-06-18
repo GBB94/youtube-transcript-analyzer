@@ -1,11 +1,10 @@
 # transcript-tool
 
 Staged, policy-driven video transcript acquisition. Caption strategies first,
-audio ASR as the floor. This repository is the **Phase 1 starter**: the compliance-
-safe, offline `uploaded_file` slice, with later strategies stubbed and labelled.
+audio ASR as the floor.
 
-- **Start here:** `CLAUDE.md` (working agreement) and `docs/PHASE_1_BUILD.md` (current task).
-- **Full spec:** `docs/DESIGN.md`.
+- **Start here:** `CLAUDE.md` (working agreement) and `docs/DESIGN.md` (full spec).
+- **Phase 1 task notes:** `docs/PHASE_1_BUILD.md`.
 
 ## Quickstart
 ```
@@ -16,12 +15,25 @@ transcript doctor
 ```
 
 ## Status
-**Phases 1–4 built and green** (26 tests). Caption files (`uploaded_caption`),
-YouTube captions via `api_captions` (youtube-transcript-api) and `ytdlp_subs`
-(yt-dlp), and ASR via `local_whisper` (faster-whisper) with a `jiwer` regression
-harness. Strategies are unit-tested via dependency injection; live YouTube / real
-model paths are verified on a real machine. Phases 5–8 (managed providers,
-discovery, server profile, hardening) are stubbed. See `docs/DESIGN.md §16`.
+**Phases 1–4 implemented, unit-tested via injected adapters, and live-verified on
+macOS ARM (CPU).**
+
+- **Phase 1 (`uploaded_caption`)** — complete and green, including the hardening
+  suite (`.srt` fixtures, all-gates-fail, `policy_hash` invalidation, corrupt-cache
+  recovery).
+- **Phase 2 (`api_captions`, youtube-transcript-api)** and **Phase 3 (`ytdlp_subs`,
+  yt-dlp)** — unit-tested via dependency injection (fake client / runner) **and**
+  smoke-verified against a real public YouTube video.
+- **Phase 4 (`local_whisper`, faster-whisper)** — unit-tested with a fake
+  transcriber **and** verified end-to-end against the real `small` model on real
+  audio (lazy local-only load, no mid-request download).
+- **Phases 5–8** (managed providers, discovery, server profile, hardening suites)
+  are stubbed with contract docstrings. See `docs/DESIGN.md §16`.
+
+Verification is environment-specific: the unit suite is the portable guarantee
+(`pytest -q`); the live/real-model paths depend on local runtime deps. Run
+`transcript doctor` to see per-strategy readiness on a given machine. Dependencies
+are pinned in `uv.lock` for reproducible installs.
 
 ```
 # captions from a file

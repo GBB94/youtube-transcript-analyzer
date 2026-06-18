@@ -83,34 +83,77 @@ def cmd_find(args: argparse.Namespace) -> int:
     return 3
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
-    """Environment self-check. Phase 1 checks Python deps + optional tools so the
-    later phases fail loudly, not silently."""
-    ok = True
+def _have_module(name: str) -> bool:
+    import importlib.util
+    return importlib.util.find_spec(name) is not None
 
-    def check(label: str, present: bool, hint: str = "") -> None:
-        nonlocal ok
-        status = "OK" if present else "MISSING"
-        if not present:
-            ok = False
-        _log(f"  [{status}] {label}" + (f"  -> {hint}" if not present and hint else ""))
+
+def _strategy_checks(name: str) -> list[dict]:
+    """Per-strategy runtime requirements. Each check is
+    {label, ok, required, hint}; a strategy is ready iff every *required* check
+    passes. `recommended` checks (required=False) only degrade capability."""
+    if name == "uploaded_caption":
+        # Offline caption parsing — only the core dependency, which is shared.
+        return [{"label": "pydantic", "ok": _have_module("pydantic"),
+                 "required": True, "hint": "pip install pydantic"}]
+    if name == "api_captions":
+        return [{"label": "youtube-transcript-api", "ok": _have_module("youtube_transcript_api"),
+                 "required": True, "hint": "pip install '.[captions]'"}]
+    if name == "ytdlp_subs":
+        return [
+            {"label": "yt-dlp binary", "ok": shutil.which("yt-dlp") is not None,
+             "required": True, "hint": "pip install '.[media]'"},
+            {"label": "JS runtime (deno/node)", "ok": any(shutil.which(b) for b in ("deno", "node")),
+             "required": True, "hint": "install Deno or Node for YouTube support"},
+            {"label": "ffmpeg", "ok": shutil.which("ffmpeg") is not None,
+             "required": False, "hint": "brew install ffmpeg (best-quality audio)"},
+        ]
+    if name == "local_whisper":
+        from .provisioning import ModelSpec, is_provisioned
+        from .strategies.local_whisper import _store_dir
+        spec = ModelSpec()
+        return [
+            {"label": "faster-whisper", "ok": _have_module("faster_whisper"),
+             "required": True, "hint": "pip install '.[asr]'"},
+            {"label": f"model '{spec.size}' provisioned ({_store_dir()})",
+             "ok": _have_module("faster_whisper") and is_provisioned(spec, _store_dir()),
+             "required": True, "hint": "pre-provision the model out of band (never downloaded mid-request)"},
+            {"label": "ffmpeg", "ok": shutil.which("ffmpeg") is not None,
+             "required": False, "hint": "brew install ffmpeg (URL->audio acquisition)"},
+        ]
+    return [{"label": f"unknown strategy '{name}'", "ok": False, "required": True, "hint": ""}]
+
+
+# The strategies that are actually implemented (Phases 1-4).
+BUILT_STRATEGIES = ("uploaded_caption", "api_captions", "ytdlp_subs", "local_whisper")
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Environment self-check. Validates the runtime dependencies of each enabled
+    strategy and reports profile-aware readiness: `doctor_ok` is true only when
+    every requested strategy can actually run on this machine."""
+    requested = tuple(args.strategies) if args.strategies else BUILT_STRATEGIES
 
     _log("transcript doctor:")
-    try:
-        import pydantic  # noqa: F401
-        check("pydantic", True)
-    except Exception:
-        check("pydantic", False, "pip install pydantic")
+    report: dict[str, dict] = {}
+    all_ready = True
+    for name in requested:
+        checks = _strategy_checks(name)
+        ready = all(c["ok"] for c in checks if c["required"])
+        all_ready = all_ready and ready
+        missing = [c["label"] for c in checks if c["required"] and not c["ok"]]
+        report[name] = {"ready": ready, "missing": missing}
 
-    check("yt-dlp (Phase 3)", shutil.which("yt-dlp") is not None, "pip install yt-dlp")
-    check("JS runtime deno/node (Phase 3)",
-          any(shutil.which(b) for b in ("deno", "node")),
-          "install Deno or Node for full YouTube support")
-    check("ffmpeg (yt-dlp, Phase 3)", shutil.which("ffmpeg") is not None,
-          "install ffmpeg for best-quality audio")
-    _log("  [note] PO-token provider plugin + faster-whisper model are Phase 3/4 setup.")
-    _emit({"doctor_ok": ok})
-    return 0 if ok else 1
+        _log(f"  {name}: {'READY' if ready else 'NOT READY'}")
+        for c in checks:
+            status = "OK" if c["ok"] else ("MISSING" if c["required"] else "optional")
+            line = f"    [{status}] {c['label']}"
+            if not c["ok"] and c["hint"]:
+                line += f"  -> {c['hint']}"
+            _log(line)
+
+    _emit({"doctor_ok": all_ready, "strategies": report})
+    return 0 if all_ready else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -136,7 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("--format", choices=["ids", "jsonl"], default="ids")
     find.set_defaults(func=cmd_find)
 
-    doctor = sub.add_parser("doctor", help="check the environment / dependencies")
+    doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")
+    doctor.add_argument("--strategies", nargs="+",
+                        help="scope the check to these strategies (default: all built strategies)")
     doctor.set_defaults(func=cmd_doctor)
     return p
 
