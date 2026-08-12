@@ -297,6 +297,52 @@ def cmd_corpus_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _only_slug(corpus_root: Path) -> str | None:
+    """When --source is omitted and exactly one corpus exists, use it."""
+    if not corpus_root.exists():
+        return None
+    slugs = [p.parent.name for p in corpus_root.glob("*/manifest.json")]
+    return slugs[0] if len(slugs) == 1 else None
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Grounded answering (§10). Answer text -> stdout; logs -> stderr.
+    Exit codes: 0 grounded, 1 insufficient evidence, 2 failed/usage."""
+    from .corpus.store import CorpusStore
+    from .retrieval.answer import ask_sync
+    from .retrieval.retrieve import Filters, LocalCrossEncoder, RetrieveConfig
+
+    corpus_root = Path(args.corpus_root).expanduser()
+    slug = args.source or _only_slug(corpus_root)
+    if not slug:
+        _log("error: pass --source <slug> (multiple or zero corpora found)")
+        return 2
+
+    store = CorpusStore(corpus_root)
+    filters = Filters(since=args.since, until=args.until, speaker=args.speaker)
+    reranker = None if args.no_rerank else LocalCrossEncoder()
+    _log(f"ask: {slug} (k={args.k}, rerank={not args.no_rerank})")
+    answer = ask_sync(args.question, store=store, slug=slug, filters=filters,
+                      reranker=reranker,
+                      retrieve_config=RetrieveConfig(k=args.k))
+
+    if args.json:
+        _emit(answer.model_dump())
+    elif answer.answer_outcome == "grounded":
+        print(answer.answer, file=sys.stdout)
+        print("", file=sys.stdout)
+        for c in answer.citations:
+            label = c.title or c.video_id
+            print(f"- {label} ({c.provenance}) {c.url_with_timestamp}", file=sys.stdout)
+    elif answer.answer_outcome == "insufficient_evidence":
+        print("No supporting passages found in the corpus for this question.",
+              file=sys.stdout)
+    else:
+        _log(f"ask failed: {answer.reason}")
+
+    return {"grounded": 0, "insufficient_evidence": 1}.get(answer.answer_outcome, 2)
+
+
 def _have_module(name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(name) is not None
@@ -439,6 +485,21 @@ def build_parser() -> argparse.ArgumentParser:
     cstatus.add_argument("slug")
     cstatus.add_argument("--corpus-root", default="corpus")
     cstatus.set_defaults(func=cmd_corpus_status)
+
+    ask = sub.add_parser("ask", help="ask a question; grounded answer with deep-link citations")
+    ask.add_argument("question")
+    ask.add_argument("--source", help="corpus slug (defaults when exactly one exists)")
+    ask.add_argument("--since", help="only episodes uploaded on/after YYYY-MM-DD")
+    ask.add_argument("--until", help="only episodes uploaded on/before YYYY-MM-DD")
+    ask.add_argument("--speaker", help="only chunks attributed to this speaker "
+                                       "(diarized episodes only)")
+    ask.add_argument("--k", type=int, default=8)
+    ask.add_argument("--no-rerank", action="store_true",
+                     help="skip the cross-encoder rerank stage")
+    ask.add_argument("--json", action="store_true",
+                     help="emit the structured answer object (outcome, citations, trace)")
+    ask.add_argument("--corpus-root", default="corpus")
+    ask.set_defaults(func=cmd_ask)
 
     doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")
     doctor.add_argument("--strategies", nargs="+",

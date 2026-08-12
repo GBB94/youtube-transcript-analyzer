@@ -150,6 +150,22 @@ class ChunkIndex:
         data = tbl.to_arrow().column("video_id")
         return set(data.to_pylist())
 
+    def get_chunks(self, chunk_ids: list[str]) -> dict[str, dict]:
+        """Fetch stored rows by chunk id (parent-context expansion, §10). ids are
+        `video_id:ordinal`, so ':' joins two id-alphabet halves."""
+        if not chunk_ids:
+            return {}
+        quoted = []
+        for cid in chunk_ids:
+            vid, _, ordinal = cid.rpartition(":")
+            quoted.append(f"'{_sql_str(vid)[1:-1]}:{_sql_str(ordinal)[1:-1]}'")
+        tbl = self.table()
+        if tbl is None:
+            return {}
+        rows = (tbl.search(None).where(f"chunk_id IN ({', '.join(quoted)})")
+                .limit(len(chunk_ids)).to_list())
+        return {r["chunk_id"]: r for r in rows}
+
     def search_dense(self, vector: list[float], n: int,
                      where: Optional[str] = None) -> list[dict]:
         tbl = self.table()
