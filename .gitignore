@@ -9,5 +9,5 @@ dist/
 # Retrieval half (docs/RETRIEVAL_DESIGN.md): canonical corpus + derived indexes.
 # Large and re-derivable; not versioned. Layer 1 (raw/) is the source of truth,
 # backed up out of band, not committed.
-corpus/
-index/
+/corpus/
+/index/
