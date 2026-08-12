@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from transcript_tool.policy import Policy
-from transcript_tool.provisioning import ModelSpec, ModelUnavailable
+from transcript_tool.provisioning import ModelUnavailable
 from transcript_tool.schema import Outcome, Provenance, Reason, TimestampType, VideoRef
 from transcript_tool.strategies.local_whisper import (
     ASRResult, ASRSegment, LocalWhisperStrategy,

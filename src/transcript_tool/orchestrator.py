@@ -6,7 +6,6 @@ Phase 1 wires the uploaded_caption strategy; later strategies register here.
 from __future__ import annotations
 
 import asyncio
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -86,7 +85,6 @@ async def _run_pipeline(ref: VideoRef, policy: Policy) -> Result:
         except NotImplementedError:
             continue
         except Exception as e:  # unexpected -> provider_error, keep going
-            t = time.monotonic()
             attempts.append(Attempt(strategy=strat.name, ok=False,
                                     reason=Reason.provider_error,
                                     quality_rejections=[type(e).__name__]))

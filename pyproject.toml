@@ -16,7 +16,7 @@ managed = ["httpx>=0.27"]                    # Phase 5 managed providers
 discovery = ["google-api-python-client>=2.0"] # Phase 6
 web = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9"]  # batch web UI (UI-1+)
 cli = ["rich>=13.0"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10"]
 
 [project.scripts]
 transcript = "transcript_tool.cli:main"
@@ -34,3 +34,23 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Correctness-first: pyflakes + the pycodestyle error classes + bugbear.
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = ["B008"]  # FastAPI's Form(...) default-call idiom
+
+[tool.ruff.lint.per-file-ignores]
+# Test idioms predating ruff: blind pytest.raises, compact fixtures, `l` for label.
+"tests/*" = ["B017", "E701", "E741"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/transcript_tool"]
+ignore_missing_imports = true
+check_untyped_defs = true

@@ -16,7 +16,7 @@ from ..normalize import normalize_caption_file
 from ..policy import Policy
 from ..quality import evaluate, rejected, rejection_reasons
 from ..schema import (
-    Attempt, Cost, GateResult, Language, Provenance, Reason, Result, Segment,
+    Attempt, Cost, Language, Provenance, Reason, Result, Segment,
     TimestampType, VideoRef,
 )
 

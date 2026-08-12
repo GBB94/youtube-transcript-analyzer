@@ -50,7 +50,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Optional, Protocol
+from typing import Optional, Protocol
 
 from ..policy import Policy
 from ..quality import evaluate, rejected, rejection_reasons
@@ -286,7 +286,8 @@ class _ManagedBase:
             original_language=pt.source_language if pt.translated else None,
             detection_method="provider_flag" if pt.translated else None,
         )
-        import hashlib, json as _json
+        import hashlib
+        import json as _json
         raw_ref = "sha256:" + hashlib.sha256(
             _json.dumps([(s.start, s.end, s.text) for s in pt.segments]).encode()).hexdigest()
         res = Result.make_success(

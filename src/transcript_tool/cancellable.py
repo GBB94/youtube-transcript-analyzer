@@ -50,7 +50,7 @@ def run_in_process(func: Callable, args: Sequence = (), timeout: float | None = 
             status, payload = q.get(timeout=timeout)
         except queue.Empty:
             _terminate(p, grace_seconds)
-            raise TimeoutError("execution exceeded timeout; child process terminated")
+            raise TimeoutError("execution exceeded timeout; child process terminated") from None
         # Got a result; let the (now-finishing) child exit cleanly.
         p.join(grace_seconds)
         if status == "ok":
