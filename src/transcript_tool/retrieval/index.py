@@ -34,6 +34,30 @@ def search_text_of(chunk: Chunk) -> str:
     return f"{chunk.context}\n{chunk.text}" if chunk.context else chunk.text
 
 
+def _arrow_schema(dim: int):
+    """Explicit schema so nullable string columns (context, speaker, title) never
+    get inferred as Null from an all-None first batch."""
+    import pyarrow as pa
+    return pa.schema([
+        ("chunk_id", pa.string()),
+        ("video_id", pa.string()),
+        ("source_slug", pa.string()),
+        ("url", pa.string()),
+        ("title", pa.string()),
+        ("upload_date", pa.string()),
+        ("start_s", pa.float64()),
+        ("end_s", pa.float64()),
+        ("provenance", pa.string()),
+        ("speaker", pa.string()),
+        ("text", pa.string()),
+        ("context", pa.string()),
+        ("chunker_version", pa.string()),
+        ("context_version", pa.string()),
+        ("search_text", pa.string()),
+        ("vector", pa.list_(pa.float32(), dim)),
+    ])
+
+
 def _row(chunk: Chunk, vector: list[float]) -> dict:
     row = chunk.model_dump()
     row["search_text"] = search_text_of(chunk)
@@ -92,7 +116,8 @@ class ChunkIndex:
         if tbl is None:
             if not rows:
                 return
-            self._table = self._connect().create_table(TABLE_NAME, data=rows)
+            self._table = self._connect().create_table(
+                TABLE_NAME, data=rows, schema=_arrow_schema(len(vectors[0])))
             return
         tbl.delete(f"video_id = {_sql_str(video_id)}")
         if rows:
