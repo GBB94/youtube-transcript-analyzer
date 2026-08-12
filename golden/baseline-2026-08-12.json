@@ -1,0 +1,149 @@
+{
+  "slug": "moonshots-diamandis",
+  "k": 8,
+  "n_questions": 21,
+  "recall_at_k": 0.4762,
+  "mrr": 0.2766,
+  "per_question": [
+    {
+      "id": "q01",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q02",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q03",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": true
+    },
+    {
+      "id": "q04",
+      "hit": true,
+      "first_rank": 2,
+      "time_sensitive": false
+    },
+    {
+      "id": "q05",
+      "hit": true,
+      "first_rank": 3,
+      "time_sensitive": false
+    },
+    {
+      "id": "q06",
+      "hit": true,
+      "first_rank": 2,
+      "time_sensitive": false
+    },
+    {
+      "id": "q07",
+      "hit": true,
+      "first_rank": 7,
+      "time_sensitive": false
+    },
+    {
+      "id": "q08",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q09",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q10",
+      "hit": true,
+      "first_rank": 1,
+      "time_sensitive": false
+    },
+    {
+      "id": "q11",
+      "hit": true,
+      "first_rank": 1,
+      "time_sensitive": false
+    },
+    {
+      "id": "q12",
+      "hit": true,
+      "first_rank": 3,
+      "time_sensitive": false
+    },
+    {
+      "id": "q13",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q14",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q15",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q16",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": true
+    },
+    {
+      "id": "q17",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": true
+    },
+    {
+      "id": "q18",
+      "hit": true,
+      "first_rank": 2,
+      "time_sensitive": false
+    },
+    {
+      "id": "q19",
+      "hit": false,
+      "first_rank": null,
+      "time_sensitive": false
+    },
+    {
+      "id": "q20",
+      "hit": true,
+      "first_rank": 2,
+      "time_sensitive": false
+    },
+    {
+      "id": "q21",
+      "hit": true,
+      "first_rank": 1,
+      "time_sensitive": true
+    }
+  ],
+  "versions": {
+    "built_at": "2026-08-12T05:37:22+00:00",
+    "chunk_config": {
+      "max_tokens": 600,
+      "min_tokens": 300,
+      "overlap_ratio": 0.125
+    },
+    "chunker_version": "1.0.0",
+    "context_version": null,
+    "corpus_schema_version": "1.0.0",
+    "embed_model": "BAAI/bge-small-en-v1.5@main#384",
+    "index_schema_version": "1.0.0",
+    "token_counter": "tiktoken:cl100k_base"
+  }
+}

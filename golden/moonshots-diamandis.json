@@ -1,0 +1,258 @@
+{
+  "source_slug": "moonshots-diamandis",
+  "authored": "2026-08-12",
+  "questions": [
+    {
+      "id": "q01",
+      "question": "How readily can a trained AI agent be duplicated across different departments in an organization?",
+      "answers": [
+        {
+          "video_id": "8LRBhT3TLr8",
+          "timestamp_s": 859
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "you can replicate 10 of them a 100 of them a thousand of them instantly"
+    },
+    {
+      "id": "q02",
+      "question": "How does microbiome-based personalized supplementation differ from standard multi-vitamin approaches?",
+      "answers": [
+        {
+          "video_id": "Br7OLJeVNf0",
+          "timestamp_s": 1594
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "we actually make that powder only with those ingredients in that dosage and put them in a capsule"
+    },
+    {
+      "id": "q03",
+      "question": "When will artificial intelligence reach professional-level expertise across multiple domains simultaneously?",
+      "answers": [
+        {
+          "video_id": "uqc8PWYq9Hw",
+          "timestamp_s": 1089
+        }
+      ],
+      "time_sensitive": true,
+      "quote": "within 6 to 8 years from now so 2030 right after that maybe 2032 under current growth rate"
+    },
+    {
+      "id": "q04",
+      "question": "What proportion of the global population currently monitors their sleep on a regular basis?",
+      "answers": [
+        {
+          "video_id": "zI8VA8aV0Vw",
+          "timestamp_s": 971
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "1% of humanity measured their sleep last night yet we know that sleep is"
+    },
+    {
+      "id": "q05",
+      "question": "How do emerging brain-computer interfaces compare to existing neural implant technologies in their physical design?",
+      "answers": [
+        {
+          "video_id": "kSS8COCDlUo",
+          "timestamp_s": 666
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "rather than like a thousand little microfibers which neuralink puts into the neocortex of the brain we're talking about tens of millions"
+    },
+    {
+      "id": "q06",
+      "question": "What structural advantage does the merged government-business model provide in advancing technological capabilities?",
+      "answers": [
+        {
+          "video_id": "TZx9LGNeexg",
+          "timestamp_s": 2706
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "their government and the private fit companies, there's no line between them"
+    },
+    {
+      "id": "q07",
+      "question": "Does artificial intelligence primarily accelerate creative work completion or enable higher quality creative output?",
+      "answers": [
+        {
+          "video_id": "fhB_ZX2XGf0",
+          "timestamp_s": 747
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "what it does do is it doesn't help you do the task more quickly it levels you up too"
+    },
+    {
+      "id": "q08",
+      "question": "What policy measure did the speakers advocate for to ensure low-income individuals can access necessary pharmaceutical treatments?",
+      "answers": [
+        {
+          "video_id": "AHJo362MGQg",
+          "timestamp_s": 2517
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "I'm hoping that the funding is there, that we can continue to help people who can't afford to pay for their drugs and their meds."
+    },
+    {
+      "id": "q09",
+      "question": "How might an alternative acquirer have changed the trajectory of a major GPU chip manufacturer's business priorities?",
+      "answers": [
+        {
+          "video_id": "21I_3VEs0iI",
+          "timestamp_s": 1041
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "if we had bought Nvidia, they never would have turned into what they are today"
+    },
+    {
+      "id": "q10",
+      "question": "What mechanism has democratized access to information retrieval services for children across different socioeconomic backgrounds?",
+      "answers": [
+        {
+          "video_id": "zpw64xIlgJ0",
+          "timestamp_s": 4939
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "any kid with a smartphone has access to Google at the same level that Larry and Sergey's kids have access to Google it's not a little bit better"
+    },
+    {
+      "id": "q11",
+      "question": "How did a major retailer's use of satellite infrastructure provide margin advantages over competitors in the industry?",
+      "answers": [
+        {
+          "video_id": "f0MUe-0zpBQ",
+          "timestamp_s": 2113
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "they had their own geostationary satellite because Benil happens to be the geographic center of the US"
+    },
+    {
+      "id": "q12",
+      "question": "What is the current global market share percentage for a specific country's advanced semiconductor manufacturing for artificial intelligence applications?",
+      "answers": [
+        {
+          "video_id": "ZnKEqWrzlXg",
+          "timestamp_s": 426
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "They have 66% of world share now on advanced chips that drive AI. 66%. absolutely won the battle, locked it up and right at the finish line"
+    },
+    {
+      "id": "q13",
+      "question": "What performance score did a software engineering AI system achieve on a standardized developer benchmark test?",
+      "answers": [
+        {
+          "video_id": "r4jGthLW8ZQ",
+          "timestamp_s": 2065
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "accounting for everything that we've tested and verified using SBCLI was 86.8%"
+    },
+    {
+      "id": "q14",
+      "question": "Which external business applications can users direct an AI conversational system to perform specific tasks through an integrated interface?",
+      "answers": [
+        {
+          "video_id": "bXT0PBasDc0",
+          "timestamp_s": 544
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "they're talking to apps within chat GPT. They have an uh an apps SDK and the ability for them to say to booking.com, book me this trip or Figma"
+    },
+    {
+      "id": "q15",
+      "question": "How did the flagship Anthropic model perform when managing smaller AI systems in a collaborative benchmark?",
+      "answers": [
+        {
+          "video_id": "zJ9kejR4PeQ",
+          "timestamp_s": 1171
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "is a really good orchestrator of agents and this is the multi-agent support type of thing"
+    },
+    {
+      "id": "q16",
+      "question": "What data compression and precision reduction techniques enable extreme model size reduction according to recent research?",
+      "answers": [
+        {
+          "video_id": "NHAzpG95ptI",
+          "timestamp_s": 758
+        }
+      ],
+      "time_sensitive": true,
+      "quote": "FP4 and then turnary weights in the neural net really shrinking the parameters down to the smallest"
+    },
+    {
+      "id": "q17",
+      "question": "According to the expert discussed, when do current predictions estimate artificial general intelligence could arrive?",
+      "answers": [
+        {
+          "video_id": "8iWSNwIRazc",
+          "timestamp_s": 339
+        }
+      ],
+      "time_sensitive": true,
+      "quote": "People are predicting a little bit sooner than that like 2027 and so on"
+    },
+    {
+      "id": "q18",
+      "question": "What fundamental architectural change has this robotics company implemented to replace traditional procedural control systems?",
+      "answers": [
+        {
+          "video_id": "S_fXhVT67Uw",
+          "timestamp_s": 547
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "change from dropping that last 100,000 105,000 lines of C code"
+    },
+    {
+      "id": "q19",
+      "question": "In the transition following mass automation, which safety net program must precede a society with guaranteed high income?",
+      "answers": [
+        {
+          "video_id": "toE56X2h0wk",
+          "timestamp_s": 233
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "universal basic income would probably have to come first. Uh it would be like an intermediate step"
+    },
+    {
+      "id": "q20",
+      "question": "Within the coming decade, what software feature does Uber predict will be built into most new vehicles sold?",
+      "answers": [
+        {
+          "video_id": "fzKVYNBg50E",
+          "timestamp_s": 747
+        }
+      ],
+      "time_sensitive": false,
+      "quote": "every single new car sold is going to have autonomous software associated with it"
+    },
+    {
+      "id": "q21",
+      "question": "Which release number in Elon's announced roadmap is designated as the target for achieving artificial general intelligence?",
+      "answers": [
+        {
+          "video_id": "Bj0i-yvIUQs",
+          "timestamp_s": 1626
+        }
+      ],
+      "time_sensitive": true,
+      "quote": "Grok 5 he predicts to be AGI, Grok 6 ASI, Grok 7 ASI 2"
+    }
+  ]
+}
