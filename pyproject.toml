@@ -15,6 +15,12 @@ asr_test = ["jiwer>=3.0"]                    # Phase 4 regression
 managed = ["httpx>=0.27"]                    # Phase 5 managed providers
 discovery = ["google-api-python-client>=2.0"] # Phase 6
 web = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9"]  # batch web UI (UI-1+)
+retrieval = ["lancedb>=0.15", "tiktoken>=0.7"]        # R0-R6 corpus & query (one store)
+embed = ["sentence-transformers>=3.0"]                # local embedder + cross-encoder reranker
+rerank = ["sentence-transformers>=3.0"]               # alias — same library provides both
+embed_api = ["voyageai>=0.3"]                         # optional API embedder (egress)
+answer = ["anthropic>=0.40"]                          # contextual enrichment + grounded answering
+diarize = ["pyannote.audio>=3.1"]                     # R7 per-episode speaker segmentation
 cli = ["rich>=13.0"]
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10"]
 

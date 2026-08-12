@@ -70,9 +70,10 @@ class ChunkIndex:
     directory and rebuilding from raw/ is routine, offline, and idempotent."""
 
     def __init__(self, index_dir: Path):
+        from typing import Any
         self.index_dir = Path(index_dir)
-        self._db = None
-        self._table = None
+        self._db: Any = None
+        self._table: Any = None
 
     # ---- connection ---------------------------------------------------------
 

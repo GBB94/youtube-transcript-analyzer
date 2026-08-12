@@ -39,16 +39,17 @@ def corpus_build(store: CorpusStore, slug: str, *, rebuild: bool = False,
                  log: Callable[[str], None] = lambda _msg: None) -> dict:
     """Returns {built, unchanged, removed, chunks, versions}. `embedder` and
     `contextizer` are injectable; the defaults resolve from `embedder_kind` /
-    `use_context` (context wiring lands with R4 and fails closed until then)."""
+    `use_context`. The CLI passes use_context=True unless --no-context (§20:
+    enrichment is on by default and skippable)."""
     embedder = embedder or get_embedder(embedder_kind)
     if use_context and contextizer is None:
-        from .context import default_contextizer   # R4; ImportError before it lands
+        from .context import default_contextizer
         contextizer = default_contextizer()
     emb_id = embedder_id(embedder)
     ctx_version = _context_version(contextizer)
 
     index = ChunkIndex(store.index_dir(slug))
-    report = {"built": 0, "unchanged": 0, "removed": 0, "chunks": 0}
+    report: dict = {"built": 0, "unchanged": 0, "removed": 0, "chunks": 0}
 
     with store.lock(slug):
         manifest = store.load_manifest(slug)
@@ -57,13 +58,13 @@ def corpus_build(store: CorpusStore, slug: str, *, rebuild: bool = False,
         # A different embedding space or index schema invalidates the whole table —
         # per-video incrementality only holds inside one build tuple.
         build = index.read_build()
-        table_invalid = build is not None and (
-            build.get("embed_model") != emb_id
-            or build.get("index_schema_version") != INDEX_SCHEMA_VERSION)
+        table_invalid = False
+        if build is not None and (build.get("embed_model") != emb_id
+                                  or build.get("index_schema_version") != INDEX_SCHEMA_VERSION):
+            table_invalid = True
+            log(f"corpus build: build tuple changed ({build.get('embed_model')} -> "
+                f"{emb_id}); full rebuild")
         if rebuild or table_invalid:
-            if table_invalid:
-                log(f"corpus build: build tuple changed ({build.get('embed_model')} -> "
-                    f"{emb_id}); full rebuild")
             index.drop()
 
         # Deletion cascades: index rows for videos gone from the manifest.

@@ -23,7 +23,9 @@ class Embedder(Protocol):
     with different identity never share a table."""
     name: str
     revision: str
-    dim: int
+
+    @property
+    def dim(self) -> int: ...
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 

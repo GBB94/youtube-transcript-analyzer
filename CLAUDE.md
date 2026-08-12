@@ -12,8 +12,8 @@ Two halves of one system:
    produces clean, provenance-rich transcripts from video. Caption strategies
    first, audio ASR as the floor. Reliability comes from honest staging + good
    contracts, not from pretending every video succeeds.
-2. **Corpus & query (the ask half) — specified in `docs/RETRIEVAL_DESIGN.md`, not
-   yet built.** Turn pulled transcripts into a queryable knowledge base: grounded
+2. **Corpus & query (the ask half) — built, R0–R7** (`docs/RETRIEVAL_DESIGN.md`).
+   Turn pulled transcripts into a queryable knowledge base: grounded
    answers with episode+timestamp citations. Canonical transcripts are pulled once
    and are the source of truth; everything downstream (chunks, embeddings, indexes)
    is derived and rebuildable **with no network access**.
@@ -56,7 +56,7 @@ Then: normalize (versioned) → quality-gate → cache → emit.
   **lazily** on first ASR use (local) or warm at startup (server). **Never download
   a model mid-request** — a caption-first run must not load a multi-GB model.
 
-## Golden rules — retrieval half (see `docs/RETRIEVAL_DESIGN.md`; enforce once building R0+)
+## Golden rules — retrieval half (see `docs/RETRIEVAL_DESIGN.md`; built, keep enforced)
 - **Canonical vs. derived is sacred.** `corpus/<slug>/raw/*.json` is the only
   expensive, never-discarded layer. Chunks, contextual blurbs, embeddings, and
   indexes are pure functions of it and must rebuild **offline**. A version bump
@@ -132,8 +132,21 @@ src/transcript_tool/
   asr_eval.py        # jiwer regression harness (P4)
   media.py           # yt-dlp audio acquisition for URL->ASR (live-only)
   discover.py        # YouTube Data API discovery + dual-bucket quota (P6)
-  corpus/            # PLANNED (R0) — canonical store: CorpusRecord, manifest, raw/+markdown/ layers
-  retrieval/         # PLANNED (R1-R6) — chunk, context, embed, index (ONE LanceDB store: dense+FTS), rerank, answer, eval
+  corpus/            # R0+R7 — canonical store + ingest
+    records.py         # CorpusRecord, content_hash, date__id naming
+    store.py           # raw/+markdown/ layers, manifest ledger, atomic writes, slug lock
+    ingest.py          # corpus add (reuses find+pull; only-new; hash guard)
+    status.py          # counts, versions, staleness
+    diarize.py         # R7 per-episode opt-in: audio->ASR->speakers (Diarizer injectable)
+  retrieval/         # R1-R6 — all derived, versioned, offline-rebuildable
+    chunk.py           # CHUNKER_VERSION; chapter/utterance/speaker-aware, overlap
+    embed.py           # Embedder protocol; local default, Voyage API optional
+    index.py           # ONE LanceDB store (dense+FTS+ChunkMeta); build.json tuple
+    build.py           # corpus build: per-video staleness, cascades, manifest stamps
+    retrieve.py        # hybrid RRF + cross-encoder rerank + prefilter Filters
+    context.py         # CONTEXT_VERSION; prompt-cached blurbs (egress, gated)
+    answer.py          # ask/ask_sync; grounded|insufficient_evidence|failed
+    evalharness.py     # golden set, recall@k/MRR, judge, --compare gate
 tests/             # pytest; golden VTT fixtures govern dedup
 docs/DESIGN.md          # the authoritative v3 acquisition spec
 docs/RETRIEVAL_DESIGN.md # the corpus & query (ask half) spec
@@ -180,18 +193,25 @@ transcript doctor
 > URL) are gated by `EgressPolicy.allow_public_url` and the CLI's
 > `--enable-public-url` flag. Do not enable by default; honor `DESIGN.md §4`.
 
-- **Planned — retrieval half (R0–R6, `docs/RETRIEVAL_DESIGN.md`):** none built yet.
-  R0 canonical corpus store (`corpus add`, reusing `find`+`pull`); R1 versioned
-  chunker (chapter/utterance-aware, timestamped `ChunkMeta`); R2 embeddings +
-  LanceDB dense index + offline `corpus build`; R3 hybrid (LanceDB native FTS
-  BM25 + RRF + rerank + metadata filters); R4 contextual enrichment
-  (prompt-cached, versioned, gated); R5 `transcript ask` (grounded answering +
-  ±1-chunk parent-context expansion + citations); R6 eval harness
-  (recall@k / MRR / faithfulness, `eval --compare` gate); R7 on-demand diarization
-  (`corpus add --diarize`, **default off, per-episode**, mixed corpus). New CLI
-  verbs: `corpus`, `ask`, `eval`. R0 first — it banks the canonical transcripts
-  everything else derives from. **Decisions locked:** contextual enrichment on by
-  default (switchable), local embeddings by default, captions-default with
+- **Built — retrieval half (R0–R7, `docs/RETRIEVAL_DESIGN.md`):** all phases
+  implemented and unit-tested via injected adapters (fake embedder / context
+  client / answer client / diarizer — CI touches no network and downloads no
+  model). R0 canonical corpus store (`corpus add`, reusing `find`+`pull` under
+  the same egress gate); R1 versioned chunker (chapter/utterance/speaker-aware,
+  overlap, timestamped `ChunkMeta`); R2 embeddings + ONE LanceDB store +
+  offline version-aware `corpus build`; R3 hybrid (native FTS BM25 + built-in
+  RRF + cross-encoder rerank + prefilter metadata filters); R4 contextual
+  enrichment (prompt-cached system block, `CONTEXT_VERSION`, `--no-context`);
+  R5 `transcript ask` (grounded answering, server-built citations, ±1-chunk
+  expansion that never widens citations, `--json`, exit codes 0/1/2); R6 eval
+  harness (recall@k / MRR / faithfulness judge, `eval --compare` regression
+  gate, exit 3); R7 on-demand diarization (`corpus add --diarize`, default off,
+  per-episode, mixed corpus, `ask --speaker`). CLI verbs: `corpus add|build|status`,
+  `ask`, `eval`; `doctor` reports the retrieval components + per-corpus
+  staleness. Live-model paths (sentence-transformers, cross-encoder, Anthropic,
+  pyannote) are lazy optional extras verified outside CI, mirroring P2–P4.
+  **Decisions locked and implemented:** contextual enrichment on by default
+  (switchable), local embeddings by default, captions-default with
   diarization strictly opt-in per episode (never automatic on every pull), one
   LanceDB store for dense+BM25, parent-context expansion at answer time (never
   widening citations), no HyDE/keyword query expansion in v1

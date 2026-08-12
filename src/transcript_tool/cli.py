@@ -216,6 +216,8 @@ def _corpus_refs_from_channel(args: argparse.Namespace, cache) -> tuple[list, di
         return [], {}
     refs, meta = [], {}
     for v in found.videos:
+        if not v.ref.id or not v.ref.url:
+            continue
         refs.append(v.ref)
         meta[v.ref.id] = CorpusVideo(
             id=v.ref.id, url=v.ref.url, title=v.title,
@@ -426,6 +428,48 @@ def _strategy_checks(name: str) -> list[dict]:
 BUILT_STRATEGIES = ("uploaded_caption", "api_captions", "ytdlp_subs", "local_whisper")
 
 
+def _retrieval_checks() -> list[dict]:
+    """Doctor checks for the retrieval half (RETRIEVAL_DESIGN.md §11): component
+    presence. Only lancedb is required to build/query an index; models and the
+    answerer degrade capability, not the core."""
+    return [
+        {"label": "lancedb (one-store index)", "ok": _have_module("lancedb"),
+         "required": True, "hint": "pip install '.[retrieval]'"},
+        {"label": "tiktoken (token budgeting)", "ok": _have_module("tiktoken"),
+         "required": False, "hint": "pip install '.[retrieval]' (falls back to approximation)"},
+        {"label": "sentence-transformers (local embedder + reranker)",
+         "ok": _have_module("sentence_transformers"),
+         "required": False, "hint": "pip install '.[embed]'"},
+        {"label": "anthropic (context blurbs + grounded answering)",
+         "ok": _have_module("anthropic"),
+         "required": False, "hint": "pip install '.[answer]' (or build --no-context)"},
+        {"label": "pyannote.audio (corpus add --diarize)",
+         "ok": _have_module("pyannote"),
+         "required": False, "hint": "pip install '.[diarize]' (per-episode opt-in only)"},
+    ]
+
+
+def _corpus_index_checks(corpus_root: Path) -> list[dict]:
+    """Per-slug: index readable + build-versions vs current derivation versions."""
+    from .corpus.status import corpus_status
+    from .corpus.store import CorpusStore
+
+    checks: list[dict] = []
+    if not corpus_root.exists():
+        return checks
+    store = CorpusStore(corpus_root)
+    for manifest in sorted(corpus_root.glob("*/manifest.json")):
+        slug = manifest.parent.name
+        status = corpus_status(store, slug)
+        ok = status["videos"] > 0 and status["stale"] == 0
+        detail = (f"{status['videos']} videos, {status['indexed']} indexed, "
+                  f"{status['stale']} stale")
+        checks.append({"label": f"corpus '{slug}': {detail}", "ok": ok,
+                       "required": False,
+                       "hint": f"transcript corpus build {slug}" if not ok else ""})
+    return checks
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Environment self-check. Validates the runtime dependencies of each enabled
     strategy and reports profile-aware readiness: `doctor_ok` is true only when
@@ -450,7 +494,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 line += f"  -> {c['hint']}"
             _log(line)
 
-    _emit({"doctor_ok": all_ready, "strategies": report})
+    retrieval = _retrieval_checks() + _corpus_index_checks(Path(args.corpus_root).expanduser())
+    retrieval_ready = all(c["ok"] for c in retrieval if c["required"])
+    _log(f"  retrieval: {'READY' if retrieval_ready else 'NOT READY'}")
+    for c in retrieval:
+        status = "OK" if c["ok"] else ("MISSING" if c["required"] else "optional")
+        line = f"    [{status}] {c['label']}"
+        if not c["ok"] and c["hint"]:
+            line += f"  -> {c['hint']}"
+        _log(line)
+
+    _emit({"doctor_ok": all_ready, "strategies": report,
+           "retrieval": {"ready": retrieval_ready,
+                         "checks": [{"label": c["label"], "ok": c["ok"]} for c in retrieval]}})
     return 0 if all_ready else 1
 
 
@@ -555,6 +611,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")
     doctor.add_argument("--strategies", nargs="+",
                         help="scope the check to these strategies (default: all built strategies)")
+    doctor.add_argument("--corpus-root", default="corpus",
+                        help="also report per-corpus index staleness found here")
     doctor.set_defaults(func=cmd_doctor)
 
     bake = sub.add_parser("bakeoff", help="run a corpus through the pipeline and report metrics (Phase 0)")

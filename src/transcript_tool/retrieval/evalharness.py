@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Callable, Optional, Protocol
+
+if TYPE_CHECKING:
+    from .answer import Answer
 
 from ..corpus.store import CorpusStore
 from .embed import Embedder
@@ -87,7 +90,7 @@ class EvalReport:
 
 def run_eval(store: CorpusStore, slug: str, golden: list[GoldenQuestion], *,
              embedder: Embedder, reranker: Optional[Reranker] = None, k: int = 8,
-             answer_fn: Optional[Callable[[GoldenQuestion], "object"]] = None,
+             answer_fn: Optional[Callable[[GoldenQuestion], "Answer"]] = None,
              judge: Optional[JudgeClient] = None,
              log: Callable[[str], None] = lambda _msg: None) -> EvalReport:
     """Retrieval metrics always; faithfulness only when both an answer_fn (a
@@ -105,21 +108,21 @@ def run_eval(store: CorpusStore, slug: str, golden: list[GoldenQuestion], *,
         trace = retrieve(index, q.question, embedder=embedder, reranker=reranker,
                          filters=filters, config=config)
         first_rank = None
-        for rank, hit in enumerate(trace.hits, start=1):
-            if chunk_answers(hit.chunk, q.answers):
+        for rank, retrieved in enumerate(trace.hits, start=1):
+            if chunk_answers(retrieved.chunk, q.answers):
                 first_rank = rank
                 break
-        hit = first_rank is not None
-        hits_at_k += int(hit)
+        answered = first_rank is not None
+        hits_at_k += int(answered)
         reciprocal_ranks.append(1.0 / first_rank if first_rank else 0.0)
-        row = {"id": q.id, "hit": hit, "first_rank": first_rank,
-               "time_sensitive": q.time_sensitive}
-        log(f"eval: {q.id} -> {'hit@' + str(first_rank) if hit else 'MISS'}")
+        row: dict = {"id": q.id, "hit": answered, "first_rank": first_rank,
+                     "time_sensitive": q.time_sensitive}
+        log(f"eval: {q.id} -> {'hit@' + str(first_rank) if answered else 'MISS'}")
 
         if answer_fn is not None and judge is not None:
             answer = answer_fn(q)
-            verdict = {"outcome": answer.answer_outcome}
-            if answer.answer_outcome == "grounded":
+            verdict: dict = {"outcome": answer.answer_outcome}
+            if answer.answer_outcome == "grounded" and answer.answer is not None:
                 verdict.update(judge.judge(
                     q.question,
                     [h.chunk["text"] for h in trace.hits],
