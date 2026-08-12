@@ -192,6 +192,14 @@ def chunk_record(record: CorpusRecord, config: ChunkConfig = ChunkConfig(),
             if current and chapters[chapter_i] > current[0].start:
                 close(next_chapter=True)
             chapter_i += 1
+        # A speaker change on a diarized episode is a hard boundary once the
+        # chunk has substance: single-speaker chunks are what make ChunkMeta's
+        # one `speaker` label (and --speaker filtering) honest. Short
+        # interjections below min_tokens still merge rather than fragment.
+        if (current and utt.speaker != current[-1].speaker
+                and (utt.speaker is not None or current[-1].speaker is not None)
+                and current_tokens >= config.min_tokens):
+            close(next_chapter=True)
         if current_tokens + utt.tokens > config.max_tokens and current:
             close(next_chapter=False)
         current.append(utt)
