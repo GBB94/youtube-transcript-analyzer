@@ -98,6 +98,24 @@ re-query, cross-episode synthesis) and needs no key — but the grounding rules
 are a contract the answerer follows, not a schema a validator enforces, and
 the answers don't flow through the eval harness.
 
+**Query patterns for good answers** (also in `AGENTS.md`, which any agent
+landing in this repo reads first):
+
+- *Multi-part questions* ("what does the group think about X, Y, and Z"): one
+  retrieve per sub-topic, then synthesize with per-claim citations — the query
+  is embedded as asked (§20.6, no decomposition), so a compound query dilutes
+  every topic in it.
+- *Views over time*: the same query in `--since`/`--until` buckets, compared
+  by `upload_date`.
+- *Thin results*: reformulate and re-query, raise `--k`, or drop `--no-rerank`;
+  re-querying is cheap, guessing is forbidden.
+- *Models without shell access*: run the command yourself and paste the JSON —
+  the contract rides inside the payload.
+
+Each CLI invocation cold-loads the embedder (and reranker unless
+`--no-rerank`), so expect a few seconds per query; for a rapid-fire session,
+`--no-rerank` trades some precision for speed.
+
 ### 4b. Built-in answerer: `transcript ask` (enforced contract; needs `ANTHROPIC_API_KEY`)
 
 ```
