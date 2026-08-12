@@ -195,6 +195,108 @@ def cmd_find(args: argparse.Namespace) -> int:
     return 0
 
 
+def _corpus_refs_from_channel(args: argparse.Namespace, cache) -> tuple[list, dict]:
+    """Discovery reused as-is (RETRIEVAL_DESIGN.md §2): channel -> DiscoveredVideos ->
+    (refs, per-id CorpusVideo enrichment). No new YouTube access path."""
+    import os as _os
+    from .corpus.records import CorpusVideo
+    from .discover import GoogleApiClient, QuotaExceeded, QuotaTracker, channel_uploads
+
+    api_key = _os.environ.get("YOUTUBE_API_KEY")
+    if not api_key:
+        _log("error: YOUTUBE_API_KEY is not set (discovery uses the YouTube Data API).")
+        return [], {}
+    quota = QuotaTracker()
+    try:
+        found = channel_uploads(GoogleApiClient(api_key), quota, args.channel, max_n=args.max,
+                                include_shorts=not args.no_shorts,
+                                include_live=not args.no_live, cache=cache)
+    except QuotaExceeded as qe:
+        _log(f"error: quota exceeded for the '{qe.bucket}' bucket")
+        return [], {}
+    refs, meta = [], {}
+    for v in found.videos:
+        refs.append(v.ref)
+        meta[v.ref.id] = CorpusVideo(
+            id=v.ref.id, url=v.ref.url, title=v.title,
+            upload_date=(v.published_at or "")[:10] or None,
+            duration_s=float(v.duration_seconds) if v.duration_seconds else None,
+            channel_id=v.channel_id)
+    return refs, meta
+
+
+def cmd_corpus_add(args: argparse.Namespace) -> int:
+    from .corpus.ingest import corpus_add
+    from .corpus.store import CorpusStore
+    from .web.parse import parse_targets
+
+    cache = None if args.force else Cache(Path(args.cache_dir).expanduser())
+    if args.channel:
+        refs, meta = _corpus_refs_from_channel(args, cache)
+        if not refs:
+            return 2
+    else:
+        raw = _read_targets(args.file) if args.file else list(args.targets)
+        parsed = parse_targets("\n".join(raw))
+        for bad in parsed.invalid:
+            _log(f"skip {bad.raw}: {bad.reason}")
+        refs, meta = [t.ref() for t in parsed.valid], {}
+    if not refs:
+        _log("error: nothing to ingest — provide --channel, --file, or targets")
+        return 2
+
+    # Ingest pulls public URLs, so the same gate as `pull` applies (DESIGN.md §4).
+    if not args.enable_public_url:
+        _log("error: corpus ingest pulls from public URLs, which is gated; "
+             "pass --enable-public-url (see DESIGN.md §4).")
+        return 2
+
+    egress = EgressPolicy(allow_network=True, allow_public_url=True)
+    strategies = tuple(args.strategies) if args.strategies else _URL_STRATEGIES
+    policy = Policy(mode=args.policy, languages=tuple(args.lang),
+                    enabled_strategies=strategies, egress=egress)
+    store = CorpusStore(Path(args.corpus_root).expanduser())
+
+    if getattr(args, "diarize", False):
+        from .corpus.diarize import diarize_ingest
+        report = diarize_ingest(store, args.slug, refs, policy=policy, cache=cache,
+                                meta=meta, force=args.force, log=_log)
+    else:
+        import asyncio
+        report = asyncio.run(corpus_add(store, args.slug, refs, policy=policy, cache=cache,
+                                        meta=meta, force=args.force, pull=None, log=_log))
+    _log(f"corpus add: {len(report.pulled)} pulled, {len(report.superseded)} superseded, "
+         f"{len(report.skipped_existing)} already present, {len(report.unchanged)} unchanged, "
+         f"{len(report.failed)} failed")
+    _emit(report.as_dict())
+    return 0 if not report.failed else 1
+
+
+def cmd_corpus_status(args: argparse.Namespace) -> int:
+    from .corpus.status import corpus_status
+    from .corpus.store import CorpusStore
+
+    status = corpus_status(CorpusStore(Path(args.corpus_root).expanduser()), args.slug)
+    _log(f"corpus {args.slug}: {status['videos']} videos "
+         f"({status['diarized']} diarized), {status['stale']} stale vs current versions")
+    _emit(status)
+    return 0
+
+
+def cmd_corpus_build(args: argparse.Namespace) -> int:
+    from .corpus.store import CorpusStore
+    from .retrieval.build import corpus_build
+
+    store = CorpusStore(Path(args.corpus_root).expanduser())
+    report = corpus_build(store, args.slug, rebuild=args.rebuild,
+                          embedder_kind=args.embedder, use_context=not args.no_context,
+                          log=_log)
+    _log(f"corpus build: {report['built']} videos (re)indexed, "
+         f"{report['unchanged']} already current, {report['removed']} removed")
+    _emit(report)
+    return 0
+
+
 def _have_module(name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(name) is not None
@@ -297,6 +399,46 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("--region", help="search regionCode (persisted for result stability)")
     find.add_argument("--relevance-language", help="search relevanceLanguage (persisted)")
     find.set_defaults(func=cmd_find)
+
+    corpus = sub.add_parser("corpus", help="canonical corpus store + derived index (R0+)")
+    csub = corpus.add_subparsers(dest="corpus_cmd", required=True)
+
+    cadd = csub.add_parser("add", help="ingest only-new videos through the existing pipeline")
+    cadd.add_argument("slug", help="source slug, e.g. moonshots-diamandis")
+    cadd.add_argument("targets", nargs="*", help="video URLs/ids (alternative to --channel/--file)")
+    cadd.add_argument("--channel", help="channel id (UC…) or @handle to traverse uploads")
+    cadd.add_argument("--file", help="one target per line, or '-' for stdin")
+    cadd.add_argument("--max", type=int, default=200, help="channel traversal cap")
+    cadd.add_argument("--no-shorts", action="store_true", help="exclude Shorts (<=60s)")
+    cadd.add_argument("--no-live", action="store_true", help="exclude live/upcoming livestreams")
+    cadd.add_argument("--policy", choices=["captions-only", "prefer-captions", "asr-only"],
+                      default="prefer-captions")
+    cadd.add_argument("--lang", nargs="+", default=["en"])
+    cadd.add_argument("--strategies", nargs="+", help="override the strategy order")
+    cadd.add_argument("--enable-public-url", action="store_true",
+                      help="acknowledge the policy decision to extract from public URLs (gated)")
+    cadd.add_argument("--force", action="store_true",
+                      help="re-pull even if present (content-hash guard still applies)")
+    cadd.add_argument("--diarize", action="store_true",
+                      help="per-episode opt-in: route through audio->ASR + speaker "
+                           "segmentation so chunks carry speaker labels (default off, §18/R7)")
+    cadd.add_argument("--corpus-root", default="corpus")
+    cadd.set_defaults(func=cmd_corpus_add)
+
+    cbuild = csub.add_parser("build", help="(re)build chunks -> context -> embeddings -> index, "
+                                           "offline from the canonical layer")
+    cbuild.add_argument("slug")
+    cbuild.add_argument("--rebuild", action="store_true", help="force a full derived rebuild")
+    cbuild.add_argument("--no-context", action="store_true",
+                        help="skip contextual enrichment (no text leaves the machine)")
+    cbuild.add_argument("--embedder", choices=["local", "api"], default="local")
+    cbuild.add_argument("--corpus-root", default="corpus")
+    cbuild.set_defaults(func=cmd_corpus_build)
+
+    cstatus = csub.add_parser("status", help="counts, versions, staleness")
+    cstatus.add_argument("slug")
+    cstatus.add_argument("--corpus-root", default="corpus")
+    cstatus.set_defaults(func=cmd_corpus_status)
 
     doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")
     doctor.add_argument("--strategies", nargs="+",
