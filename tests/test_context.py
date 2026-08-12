@@ -33,7 +33,7 @@ class FakeContextClient:
 
     def contextualize(self, episode_doc, chunk_text):
         self.calls.append((episode_doc, chunk_text))
-        return f"From EP Alpha (2026-07-14); zanzibar discussion. "
+        return "From EP Alpha (2026-07-14); zanzibar discussion. "
 
 
 def _seed(tmp_path):
