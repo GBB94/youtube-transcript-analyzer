@@ -73,3 +73,40 @@ def test_corpus_status_runs_on_seeded_store(tmp_path, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["videos"] == 1 and payload["stale"] == 1   # not yet indexed
+
+
+def test_retrieve_verb_emits_grounded_payload(tmp_path, capsys, monkeypatch):
+    """`transcript retrieve` is the external-answerer seam: JSON hits with full
+    ChunkMeta, deep links, and the grounding contract embedded in the payload."""
+    from test_index_build import FakeEmbedder, _seed, _tokens
+    from transcript_tool.retrieval.build import corpus_build
+    from transcript_tool.retrieval.chunk import ChunkConfig
+    import transcript_tool.retrieval.embed as embed_mod
+
+    store = _seed(tmp_path)
+    corpus_build(store, "pod", embedder=FakeEmbedder(),
+                 chunk_config=ChunkConfig(max_tokens=30, min_tokens=8, overlap_ratio=0.1),
+                 token_counter=_tokens)
+    monkeypatch.setattr(embed_mod, "get_embedder", lambda kind: FakeEmbedder())
+
+    rc = main(["retrieve", "compute tradeable commodity", "--source", "pod",
+               "--no-rerank", "--k", "3",
+               "--corpus-root", str(tmp_path / "corpus")])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "Cite only chunk_ids" in payload["contract"]
+    assert payload["versions"]["embed_model"] == "fake-bow@1#32"
+    top = payload["hits"][0]
+    assert "compute" in top["text"]
+    assert top["url_with_timestamp"].endswith(f"t={int(top['start_s'])}s")
+    assert "search_text" not in top          # verbatim text and context only
+    assert top["fused_rank"] == 1
+
+    # No hits -> exit 1; missing index -> exit 2.
+    rc = main(["retrieve", "anything", "--source", "pod",
+               "--no-rerank", "--corpus-root", str(tmp_path / "corpus"),
+               "--speaker", "NOBODY"])
+    assert rc == 1
+    rc = main(["retrieve", "anything", "--source", "ghost",
+               "--corpus-root", str(tmp_path / "corpus")])
+    assert rc == 2

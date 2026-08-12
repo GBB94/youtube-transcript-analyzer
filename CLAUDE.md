@@ -122,7 +122,7 @@ src/transcript_tool/
   locking.py       # pluggable lock backend: flock (local, death-safe) / shared stub (P7)
   cancellable.py   # killable out-of-process execution for real ASR cancel (UI-0)
   bakeoff.py       # reliability bakeoff harness (P0)
-  cli.py           # pull / find / doctor / bakeoff / serve / corpus add|build|status / ask / eval
+  cli.py           # pull / find / doctor / bakeoff / serve / corpus add|build|status / retrieve / ask / eval
   strategies/
     base.py            # Strategy protocol
     uploaded_caption.py  # P1   api_captions.py  # P2

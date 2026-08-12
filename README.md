@@ -10,7 +10,9 @@ Two halves of one system:
    timestamp. Spec: **`docs/RETRIEVAL_DESIGN.md`**.
 
 - **Start here:** `CLAUDE.md` (working agreement), `docs/DESIGN.md` (acquisition
-  spec), and `docs/RETRIEVAL_DESIGN.md` (retrieval spec).
+  spec), `docs/RETRIEVAL_DESIGN.md` (retrieval spec), and **`docs/USAGE.md`**
+  (operator guide: bank → build → query, with either the built-in API answerer
+  or a local model/Claude Code session over `transcript retrieve`).
 - **Phase 1 task notes:** `docs/PHASE_1_BUILD.md`.
 
 ## Batch web UI (local)
