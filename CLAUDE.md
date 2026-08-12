@@ -122,7 +122,7 @@ src/transcript_tool/
   locking.py       # pluggable lock backend: flock (local, death-safe) / shared stub (P7)
   cancellable.py   # killable out-of-process execution for real ASR cancel (UI-0)
   bakeoff.py       # reliability bakeoff harness (P0)
-  cli.py           # pull / find / doctor / bakeoff
+  cli.py           # pull / find / doctor / bakeoff / serve / corpus add|build|status / ask / eval
   strategies/
     base.py            # Strategy protocol
     uploaded_caption.py  # P1   api_captions.py  # P2
@@ -150,15 +150,22 @@ src/transcript_tool/
 tests/             # pytest; golden VTT fixtures govern dedup
 docs/DESIGN.md          # the authoritative v3 acquisition spec
 docs/RETRIEVAL_DESIGN.md # the corpus & query (ask half) spec
-docs/PHASE_1_BUILD.md   # the current task
+docs/PHASE_1_BUILD.md   # historical phase task docs (P1, P5/6, P0/7/8)
 ```
 
 ## Build / run
 ```
 pip install -e ".[dev]"      # or: pip install pydantic pytest
 pytest -q                    # all green is the bar
+ruff check src tests         # must stay clean; corpus/ + retrieval/ are also mypy-clean
 transcript pull tests/fixtures/rolling_autocaption.vtt
-transcript doctor
+transcript doctor            # per-strategy + retrieval-component readiness
+
+# retrieval half (needs the 'retrieval' extra; models/answerer per doctor hints)
+transcript corpus add <slug> --channel @handle --no-shorts --enable-public-url
+transcript corpus build <slug>          # offline; --no-context stays fully local
+transcript ask "question" --json
+transcript eval <slug> --compare baseline.json
 ```
 
 ## What's built vs stubbed

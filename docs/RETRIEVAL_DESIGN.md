@@ -369,6 +369,14 @@ answer = await ask(query, *, source=None, since=None, k=8, filters={...})
 answer = ask_sync(query, ...)   # wrapper; raises inside a running loop
 ```
 
+*As built:* the signatures thread an explicit `CorpusStore` (root paths are
+caller state, not globals) and every external collaborator — pull, embedder,
+contextizer, answer client, reranker, diarizer — is an injectable parameter so
+the whole subsystem tests without network or models: `corpus.ingest.corpus_add
+(store, slug, refs, ...)`, `retrieval.build.corpus_build(store, slug, ...)`
+(sync — the derivation is CPU-bound file work), `retrieval.answer.ask(query, *,
+store, slug, ...)` / `ask_sync`.
+
 **CLI (new verbs alongside `pull` / `find` / `doctor`):**
 
 ```

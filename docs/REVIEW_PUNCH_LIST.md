@@ -48,8 +48,8 @@ Severity: **H** = fix before building R0 on top · **M** = fix soon · **L** = o
   `assert_safe_url` only checks the scheme — the CLI hands any host to yt-dlp with
   `--enable-public-url`, contradicting `DESIGN.md §12`'s allowlist promise.
   (The web path is safe: it canonicalizes to a strict watch URL, `web/parse.py:71`.)
-- [ ] **L — Document `MANAGED_API_BASE_URL`** in `.env.example` (read at
-  `managed.py:228`).
+- [x] **L — Document `MANAGED_API_BASE_URL`** in `.env.example` (read at
+  `managed.py:228`). *(done, with the retrieval-half keys alongside)*
 - [ ] **L — Sanitize lock keys** before path interpolation (`locking.py:55`) —
   defensive only; current callers pass hex hashes.
 
@@ -83,7 +83,7 @@ Severity: **H** = fix before building R0 on top · **M** = fix soon · **L** = o
 - [x] **H — Commit the spec work.** *(committed in 8bc4cf9)* `docs/RETRIEVAL_DESIGN.md` is untracked and
   `CLAUDE.md` / `README.md` / `docs/DESIGN.md` / `.gitignore` carry uncommitted
   edits — the locked decisions exist only in the working tree.
-- [ ] **L — Root clutter:** `CONVERSATION_LOG.txt` is a *reconstruction*, not a
-  transcript (label or drop); `RETRIEVAL_DESIGN.txt` is a duplicate export of the
-  `.md` (regenerate on spec change or drop); `moonshot_EP278_transcript.md`
-  belongs under `corpus/` once R0 exists.
+- [x] **L — Root clutter:** `CONVERSATION_LOG.txt` labelled as a reconstruction;
+  `RETRIEVAL_DESIGN.txt` regenerated from the `.md` after the status change;
+  `moonshot_EP278_transcript.md` left at root until the first real `corpus add`
+  banks it properly.

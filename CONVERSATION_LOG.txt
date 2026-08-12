@@ -1,6 +1,7 @@
 ================================================================================
 CONVERSATION LOG — YouTube Transcript Analyzer / RAG "ask half" design session
 Date: 2026-08-11
+NOTE: this log is a faithful reconstruction of the session, not a verbatim transcript.
 Participants: Zach (user), Claude (Cowork)
 Companion file: RETRIEVAL_DESIGN.txt (the spec produced from this discussion)
 ================================================================================
