@@ -1,6 +1,6 @@
 """UI-2 — durable job store. Survives reopen (refresh/restart), atomic claim, counts."""
 from transcript_tool.web.jobs import (
-    JobStore, STATUS_COMPLETE, STATUS_FAILED, STATUS_QUEUED, STATUS_RUNNING,
+    JobStore, STATUS_COMPLETE, STATUS_QUEUED, STATUS_RUNNING,
 )
 from transcript_tool.web.parse import Target
 

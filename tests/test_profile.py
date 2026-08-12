@@ -8,7 +8,7 @@ from transcript_tool.cache import Cache
 from transcript_tool.locking import FileLockBackend, SharedLockBackend
 from transcript_tool.policy import EgressPolicy, Policy
 from transcript_tool.profiles import (
-    LOCAL_PROFILE, SERVER_PROFILE, ResourceLimits, enforce_limit,
+    LOCAL_PROFILE, SERVER_PROFILE, enforce_limit,
 )
 from transcript_tool.provisioning import ModelSpec, warm
 from transcript_tool.schema import Outcome, Reason, Result, Segment, Provenance, Language, TimestampType, VideoRef

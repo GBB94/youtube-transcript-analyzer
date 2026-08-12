@@ -5,7 +5,7 @@ the captions-only path, and key/request-id redaction."""
 import asyncio
 
 from transcript_tool.policy import EgressPolicy, Policy
-from transcript_tool.schema import Cost, Outcome, Provenance, Reason, VideoRef
+from transcript_tool.schema import Outcome, Provenance, Reason, VideoRef
 from transcript_tool.security import redact
 from transcript_tool.strategies.managed import (
     HttpxClient, ManagedAsrStrategy, ManagedNativeStrategy, ManagedResponse,

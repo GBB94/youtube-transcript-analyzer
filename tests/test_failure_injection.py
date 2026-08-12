@@ -5,8 +5,6 @@ propagate do propagate). Faults are injected through the strategies' existing se
 import asyncio
 import os
 import subprocess
-import tempfile
-from pathlib import Path
 
 import pytest
 

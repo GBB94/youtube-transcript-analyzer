@@ -23,7 +23,6 @@ spends no quota and makes no network calls.
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol

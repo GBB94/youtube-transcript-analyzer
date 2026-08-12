@@ -18,7 +18,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Protocol
+from typing import Optional, Protocol
 
 from ..policy import Policy
 from ..provisioning import ModelSpec, ModelUnavailable, load_lazy

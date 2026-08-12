@@ -124,7 +124,6 @@ class YtdlpSubsStrategy:
             res.attempts[0].quality_rejections = rejection_reasons(gates)
             return res
 
-        is_auto = ".auto." in vtt.name or vtt.name.endswith(f".{lang}.vtt") is False
         result = Result.make_success(
             ref,
             provenance=Provenance.platform_auto if "auto" in vtt.name else Provenance.human_caption,

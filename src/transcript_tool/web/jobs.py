@@ -160,6 +160,27 @@ class JobStore:
         job = self.get_job(job_id)
         return bool(job and job["status"] == STATUS_CANCELLED)
 
+    # ---- startup recovery ---------------------------------------------------
+
+    def recover_orphans(self) -> list[str]:
+        """Crash durability: a worker that dies mid-item leaves it `running` forever,
+        and `queued` items of an unfinished job have no worker. Workers are daemon
+        children of the web process, so at web startup no worker can still be alive —
+        every `running` item is an orphan. Flip orphans back to queued and return the
+        ids of non-cancelled jobs that still have queued work so the caller can
+        relaunch one worker per job."""
+        with self._conn() as c:
+            c.execute("UPDATE items SET status=? WHERE status=?",
+                      (STATUS_QUEUED, STATUS_RUNNING))
+            rows = c.execute(
+                "SELECT DISTINCT j.id FROM jobs j JOIN items i ON i.job_id = j.id "
+                "WHERE i.status=? AND j.status != ?",
+                (STATUS_QUEUED, STATUS_CANCELLED)).fetchall()
+            ids = [r["id"] for r in rows]
+            for jid in ids:
+                c.execute("UPDATE jobs SET status=? WHERE id=?", (STATUS_QUEUED, jid))
+        return ids
+
     # ---- cancel / retry -----------------------------------------------------
 
     def request_cancel(self, job_id: str) -> int:

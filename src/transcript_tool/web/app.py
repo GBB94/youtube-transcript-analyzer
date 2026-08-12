@@ -69,6 +69,12 @@ def create_app(db_path: Optional[str] = None, run_worker: Optional[RunWorker] = 
     app.state.run_worker = run_worker or _spawn
     app.state.cancel_worker = cancel_worker or _terminate
 
+    # Startup recovery: requeue items orphaned `running` by a dead worker and
+    # relaunch a worker for every unfinished job, so "survives a restart" holds
+    # for processing, not just the render.
+    for orphan_job_id in store.recover_orphans():
+        app.state.run_worker(orphan_job_id)
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         return _TEMPLATES.TemplateResponse(request, "index.html", {})
@@ -132,18 +138,25 @@ def create_app(db_path: Optional[str] = None, run_worker: Optional[RunWorker] = 
 
     @app.get("/jobs/{job_id}/events")
     def job_events(job_id: str):
+        # Unknown job -> 404, never an open stream: with total=0 "finished" is never
+        # true, so a bad connection would otherwise poll SQLite forever.
+        if store.get_job(job_id) is None:
+            return PlainTextResponse("Unknown job.", status_code=404)
+
         async def gen():
             last: dict[int, tuple] = {}
             while True:
-                items = store.get_items(job_id)
+                # SQLite calls run in a thread: a 30s busy timeout inside the async
+                # generator would otherwise block the event loop under contention.
+                items = await asyncio.to_thread(store.get_items, job_id)
                 for it in items:
                     sig = (it["status"], it["badge"], it["message"])
                     if last.get(it["idx"]) != sig:
                         last[it["idx"]] = sig
                         yield f"event: item\ndata: {json.dumps(_row_payload(it))}\n\n"
-                counts = store.counts(job_id)
+                counts = await asyncio.to_thread(store.counts, job_id)
                 yield f"event: counts\ndata: {json.dumps(counts)}\n\n"
-                if counts["finished"]:
+                if counts["finished"] or counts["total"] == 0:
                     yield "event: done\ndata: {}\n\n"
                     return
                 await asyncio.sleep(0.3)

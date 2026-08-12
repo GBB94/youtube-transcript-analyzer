@@ -195,6 +195,194 @@ def cmd_find(args: argparse.Namespace) -> int:
     return 0
 
 
+def _corpus_refs_from_channel(args: argparse.Namespace, cache) -> tuple[list, dict]:
+    """Discovery reused as-is (RETRIEVAL_DESIGN.md §2): channel -> DiscoveredVideos ->
+    (refs, per-id CorpusVideo enrichment). No new YouTube access path."""
+    import os as _os
+    from .corpus.records import CorpusVideo
+    from .discover import GoogleApiClient, QuotaExceeded, QuotaTracker, channel_uploads
+
+    api_key = _os.environ.get("YOUTUBE_API_KEY")
+    if not api_key:
+        _log("error: YOUTUBE_API_KEY is not set (discovery uses the YouTube Data API).")
+        return [], {}
+    quota = QuotaTracker()
+    try:
+        found = channel_uploads(GoogleApiClient(api_key), quota, args.channel, max_n=args.max,
+                                include_shorts=not args.no_shorts,
+                                include_live=not args.no_live, cache=cache)
+    except QuotaExceeded as qe:
+        _log(f"error: quota exceeded for the '{qe.bucket}' bucket")
+        return [], {}
+    refs, meta = [], {}
+    for v in found.videos:
+        if not v.ref.id or not v.ref.url:
+            continue
+        refs.append(v.ref)
+        meta[v.ref.id] = CorpusVideo(
+            id=v.ref.id, url=v.ref.url, title=v.title,
+            upload_date=(v.published_at or "")[:10] or None,
+            duration_s=float(v.duration_seconds) if v.duration_seconds else None,
+            channel_id=v.channel_id)
+    return refs, meta
+
+
+def cmd_corpus_add(args: argparse.Namespace) -> int:
+    from .corpus.ingest import corpus_add
+    from .corpus.store import CorpusStore
+    from .web.parse import parse_targets
+
+    cache = None if args.force else Cache(Path(args.cache_dir).expanduser())
+    if args.channel:
+        refs, meta = _corpus_refs_from_channel(args, cache)
+        if not refs:
+            return 2
+    else:
+        raw = _read_targets(args.file) if args.file else list(args.targets)
+        parsed = parse_targets("\n".join(raw))
+        for bad in parsed.invalid:
+            _log(f"skip {bad.raw}: {bad.reason}")
+        refs, meta = [t.ref() for t in parsed.valid], {}
+    if not refs:
+        _log("error: nothing to ingest — provide --channel, --file, or targets")
+        return 2
+
+    # Ingest pulls public URLs, so the same gate as `pull` applies (DESIGN.md §4).
+    if not args.enable_public_url:
+        _log("error: corpus ingest pulls from public URLs, which is gated; "
+             "pass --enable-public-url (see DESIGN.md §4).")
+        return 2
+
+    egress = EgressPolicy(allow_network=True, allow_public_url=True)
+    strategies = tuple(args.strategies) if args.strategies else _URL_STRATEGIES
+    policy = Policy(mode=args.policy, languages=tuple(args.lang),
+                    enabled_strategies=strategies, egress=egress)
+    store = CorpusStore(Path(args.corpus_root).expanduser())
+
+    if getattr(args, "diarize", False):
+        from .corpus.diarize import diarize_ingest
+        report = diarize_ingest(store, args.slug, refs, policy=policy, cache=cache,
+                                meta=meta, force=args.force, log=_log)
+    else:
+        import asyncio
+        report = asyncio.run(corpus_add(store, args.slug, refs, policy=policy, cache=cache,
+                                        meta=meta, force=args.force, pull=None, log=_log))
+    _log(f"corpus add: {len(report.pulled)} pulled, {len(report.superseded)} superseded, "
+         f"{len(report.skipped_existing)} already present, {len(report.unchanged)} unchanged, "
+         f"{len(report.failed)} failed")
+    _emit(report.as_dict())
+    return 0 if not report.failed else 1
+
+
+def cmd_corpus_status(args: argparse.Namespace) -> int:
+    from .corpus.status import corpus_status
+    from .corpus.store import CorpusStore
+
+    status = corpus_status(CorpusStore(Path(args.corpus_root).expanduser()), args.slug)
+    _log(f"corpus {args.slug}: {status['videos']} videos "
+         f"({status['diarized']} diarized), {status['stale']} stale vs current versions")
+    _emit(status)
+    return 0
+
+
+def cmd_corpus_build(args: argparse.Namespace) -> int:
+    from .corpus.store import CorpusStore
+    from .retrieval.build import corpus_build
+
+    store = CorpusStore(Path(args.corpus_root).expanduser())
+    report = corpus_build(store, args.slug, rebuild=args.rebuild,
+                          embedder_kind=args.embedder, use_context=not args.no_context,
+                          log=_log)
+    _log(f"corpus build: {report['built']} videos (re)indexed, "
+         f"{report['unchanged']} already current, {report['removed']} removed")
+    _emit(report)
+    return 0
+
+
+def _only_slug(corpus_root: Path) -> str | None:
+    """When --source is omitted and exactly one corpus exists, use it."""
+    if not corpus_root.exists():
+        return None
+    slugs = [p.parent.name for p in corpus_root.glob("*/manifest.json")]
+    return slugs[0] if len(slugs) == 1 else None
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Grounded answering (§10). Answer text -> stdout; logs -> stderr.
+    Exit codes: 0 grounded, 1 insufficient evidence, 2 failed/usage."""
+    from .corpus.store import CorpusStore
+    from .retrieval.answer import ask_sync
+    from .retrieval.retrieve import Filters, LocalCrossEncoder, RetrieveConfig
+
+    corpus_root = Path(args.corpus_root).expanduser()
+    slug = args.source or _only_slug(corpus_root)
+    if not slug:
+        _log("error: pass --source <slug> (multiple or zero corpora found)")
+        return 2
+
+    store = CorpusStore(corpus_root)
+    filters = Filters(since=args.since, until=args.until, speaker=args.speaker)
+    reranker = None if args.no_rerank else LocalCrossEncoder()
+    _log(f"ask: {slug} (k={args.k}, rerank={not args.no_rerank})")
+    answer = ask_sync(args.question, store=store, slug=slug, filters=filters,
+                      reranker=reranker,
+                      retrieve_config=RetrieveConfig(k=args.k))
+
+    if args.json:
+        _emit(answer.model_dump())
+    elif answer.answer_outcome == "grounded":
+        print(answer.answer, file=sys.stdout)
+        print("", file=sys.stdout)
+        for c in answer.citations:
+            label = c.title or c.video_id
+            print(f"- {label} ({c.provenance}) {c.url_with_timestamp}", file=sys.stdout)
+    elif answer.answer_outcome == "insufficient_evidence":
+        print("No supporting passages found in the corpus for this question.",
+              file=sys.stdout)
+    else:
+        _log(f"ask failed: {answer.reason}")
+
+    return {"grounded": 0, "insufficient_evidence": 1}.get(answer.answer_outcome, 2)
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Golden-set retrieval metrics + optional --compare regression gate (§13).
+    Exit codes: 0 ok, 3 regression past threshold, 2 usage."""
+    from .corpus.store import CorpusStore
+    from .retrieval.embed import get_embedder
+    from .retrieval.evalharness import compare, format_compare_table, load_golden, run_eval
+    from .retrieval.retrieve import LocalCrossEncoder
+
+    corpus_root = Path(args.corpus_root).expanduser()
+    golden_path = Path(args.golden) if args.golden else corpus_root / args.slug / "golden.json"
+    if not golden_path.exists():
+        _log(f"error: no golden set at {golden_path} (author one; see RETRIEVAL_DESIGN.md §13)")
+        return 2
+
+    store = CorpusStore(corpus_root)
+    reranker = None if args.no_rerank else LocalCrossEncoder()
+    report = run_eval(store, args.slug, load_golden(golden_path),
+                      embedder=get_embedder(args.embedder), reranker=reranker,
+                      k=args.k, log=_log)
+    payload = report.as_dict()
+    _log(f"eval: recall@{args.k}={payload['recall_at_k']} mrr={payload['mrr']} "
+         f"over {payload['n_questions']} questions")
+
+    if args.out:
+        Path(args.out).expanduser().write_text(json.dumps(payload, indent=2))
+        _log(f"eval: report written to {args.out}")
+
+    if args.compare:
+        baseline = json.loads(Path(args.compare).expanduser().read_text())
+        result = compare(baseline, payload, threshold=args.threshold)
+        _log(format_compare_table(result))
+        _emit({"report": payload, "compare": result})
+        return 0 if result["ok"] else 3
+
+    _emit(payload)
+    return 0
+
+
 def _have_module(name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(name) is not None
@@ -240,6 +428,48 @@ def _strategy_checks(name: str) -> list[dict]:
 BUILT_STRATEGIES = ("uploaded_caption", "api_captions", "ytdlp_subs", "local_whisper")
 
 
+def _retrieval_checks() -> list[dict]:
+    """Doctor checks for the retrieval half (RETRIEVAL_DESIGN.md §11): component
+    presence. Only lancedb is required to build/query an index; models and the
+    answerer degrade capability, not the core."""
+    return [
+        {"label": "lancedb (one-store index)", "ok": _have_module("lancedb"),
+         "required": True, "hint": "pip install '.[retrieval]'"},
+        {"label": "tiktoken (token budgeting)", "ok": _have_module("tiktoken"),
+         "required": False, "hint": "pip install '.[retrieval]' (falls back to approximation)"},
+        {"label": "sentence-transformers (local embedder + reranker)",
+         "ok": _have_module("sentence_transformers"),
+         "required": False, "hint": "pip install '.[embed]'"},
+        {"label": "anthropic (context blurbs + grounded answering)",
+         "ok": _have_module("anthropic"),
+         "required": False, "hint": "pip install '.[answer]' (or build --no-context)"},
+        {"label": "pyannote.audio (corpus add --diarize)",
+         "ok": _have_module("pyannote"),
+         "required": False, "hint": "pip install '.[diarize]' (per-episode opt-in only)"},
+    ]
+
+
+def _corpus_index_checks(corpus_root: Path) -> list[dict]:
+    """Per-slug: index readable + build-versions vs current derivation versions."""
+    from .corpus.status import corpus_status
+    from .corpus.store import CorpusStore
+
+    checks: list[dict] = []
+    if not corpus_root.exists():
+        return checks
+    store = CorpusStore(corpus_root)
+    for manifest in sorted(corpus_root.glob("*/manifest.json")):
+        slug = manifest.parent.name
+        status = corpus_status(store, slug)
+        ok = status["videos"] > 0 and status["stale"] == 0
+        detail = (f"{status['videos']} videos, {status['indexed']} indexed, "
+                  f"{status['stale']} stale")
+        checks.append({"label": f"corpus '{slug}': {detail}", "ok": ok,
+                       "required": False,
+                       "hint": f"transcript corpus build {slug}" if not ok else ""})
+    return checks
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Environment self-check. Validates the runtime dependencies of each enabled
     strategy and reports profile-aware readiness: `doctor_ok` is true only when
@@ -264,7 +494,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 line += f"  -> {c['hint']}"
             _log(line)
 
-    _emit({"doctor_ok": all_ready, "strategies": report})
+    retrieval = _retrieval_checks() + _corpus_index_checks(Path(args.corpus_root).expanduser())
+    retrieval_ready = all(c["ok"] for c in retrieval if c["required"])
+    _log(f"  retrieval: {'READY' if retrieval_ready else 'NOT READY'}")
+    for c in retrieval:
+        status = "OK" if c["ok"] else ("MISSING" if c["required"] else "optional")
+        line = f"    [{status}] {c['label']}"
+        if not c["ok"] and c["hint"]:
+            line += f"  -> {c['hint']}"
+        _log(line)
+
+    _emit({"doctor_ok": all_ready, "strategies": report,
+           "retrieval": {"ready": retrieval_ready,
+                         "checks": [{"label": c["label"], "ok": c["ok"]} for c in retrieval]}})
     return 0 if all_ready else 1
 
 
@@ -298,9 +540,79 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("--relevance-language", help="search relevanceLanguage (persisted)")
     find.set_defaults(func=cmd_find)
 
+    corpus = sub.add_parser("corpus", help="canonical corpus store + derived index (R0+)")
+    csub = corpus.add_subparsers(dest="corpus_cmd", required=True)
+
+    cadd = csub.add_parser("add", help="ingest only-new videos through the existing pipeline")
+    cadd.add_argument("slug", help="source slug, e.g. moonshots-diamandis")
+    cadd.add_argument("targets", nargs="*", help="video URLs/ids (alternative to --channel/--file)")
+    cadd.add_argument("--channel", help="channel id (UC…) or @handle to traverse uploads")
+    cadd.add_argument("--file", help="one target per line, or '-' for stdin")
+    cadd.add_argument("--max", type=int, default=200, help="channel traversal cap")
+    cadd.add_argument("--no-shorts", action="store_true", help="exclude Shorts (<=60s)")
+    cadd.add_argument("--no-live", action="store_true", help="exclude live/upcoming livestreams")
+    cadd.add_argument("--policy", choices=["captions-only", "prefer-captions", "asr-only"],
+                      default="prefer-captions")
+    cadd.add_argument("--lang", nargs="+", default=["en"])
+    cadd.add_argument("--strategies", nargs="+", help="override the strategy order")
+    cadd.add_argument("--enable-public-url", action="store_true",
+                      help="acknowledge the policy decision to extract from public URLs (gated)")
+    cadd.add_argument("--force", action="store_true",
+                      help="re-pull even if present (content-hash guard still applies)")
+    cadd.add_argument("--diarize", action="store_true",
+                      help="per-episode opt-in: route through audio->ASR + speaker "
+                           "segmentation so chunks carry speaker labels (default off, §18/R7)")
+    cadd.add_argument("--corpus-root", default="corpus")
+    cadd.set_defaults(func=cmd_corpus_add)
+
+    cbuild = csub.add_parser("build", help="(re)build chunks -> context -> embeddings -> index, "
+                                           "offline from the canonical layer")
+    cbuild.add_argument("slug")
+    cbuild.add_argument("--rebuild", action="store_true", help="force a full derived rebuild")
+    cbuild.add_argument("--no-context", action="store_true",
+                        help="skip contextual enrichment (no text leaves the machine)")
+    cbuild.add_argument("--embedder", choices=["local", "api"], default="local")
+    cbuild.add_argument("--corpus-root", default="corpus")
+    cbuild.set_defaults(func=cmd_corpus_build)
+
+    cstatus = csub.add_parser("status", help="counts, versions, staleness")
+    cstatus.add_argument("slug")
+    cstatus.add_argument("--corpus-root", default="corpus")
+    cstatus.set_defaults(func=cmd_corpus_status)
+
+    ask = sub.add_parser("ask", help="ask a question; grounded answer with deep-link citations")
+    ask.add_argument("question")
+    ask.add_argument("--source", help="corpus slug (defaults when exactly one exists)")
+    ask.add_argument("--since", help="only episodes uploaded on/after YYYY-MM-DD")
+    ask.add_argument("--until", help="only episodes uploaded on/before YYYY-MM-DD")
+    ask.add_argument("--speaker", help="only chunks attributed to this speaker "
+                                       "(diarized episodes only)")
+    ask.add_argument("--k", type=int, default=8)
+    ask.add_argument("--no-rerank", action="store_true",
+                     help="skip the cross-encoder rerank stage")
+    ask.add_argument("--json", action="store_true",
+                     help="emit the structured answer object (outcome, citations, trace)")
+    ask.add_argument("--corpus-root", default="corpus")
+    ask.set_defaults(func=cmd_ask)
+
+    ev = sub.add_parser("eval", help="golden-set retrieval metrics + regression gate (§13)")
+    ev.add_argument("slug")
+    ev.add_argument("--golden", help="golden-set JSON (default corpus/<slug>/golden.json)")
+    ev.add_argument("--k", type=int, default=8)
+    ev.add_argument("--embedder", choices=["local", "api"], default="local")
+    ev.add_argument("--no-rerank", action="store_true")
+    ev.add_argument("--compare", help="baseline report JSON to diff against")
+    ev.add_argument("--threshold", type=float, default=0.05,
+                    help="max allowed per-metric drop before the run fails")
+    ev.add_argument("--out", help="write the report JSON here as the next baseline")
+    ev.add_argument("--corpus-root", default="corpus")
+    ev.set_defaults(func=cmd_eval)
+
     doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")
     doctor.add_argument("--strategies", nargs="+",
                         help="scope the check to these strategies (default: all built strategies)")
+    doctor.add_argument("--corpus-root", default="corpus",
+                        help="also report per-corpus index staleness found here")
     doctor.set_defaults(func=cmd_doctor)
 
     bake = sub.add_parser("bakeoff", help="run a corpus through the pipeline and report metrics (Phase 0)")

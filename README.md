@@ -4,7 +4,7 @@ Two halves of one system:
 
 1. **Acquisition ("the pull half") — built.** Staged, policy-driven video
    transcript acquisition. Caption strategies first, audio ASR as the floor.
-2. **Corpus & query ("the ask half") — specified, not yet built.** Turn the pulled
+2. **Corpus & query ("the ask half") — built (R0–R7).** Turn the pulled
    transcripts into a durable, queryable knowledge base: ask a question, get an
    answer grounded in what was said, with a citation back to the episode and exact
    timestamp. Spec: **`docs/RETRIEVAL_DESIGN.md`**.
@@ -59,17 +59,40 @@ macOS ARM (CPU).**
 - **Phase 8 (hardening)** — failure-injection suite is green; `docs/SECURITY_REVIEW.md`
   audit done. Live canaries + SLO-conformance vs. real numbers remain infra-gated.
 
-### Corpus & query (the ask half) — specified, not yet built
-Design complete in `docs/RETRIEVAL_DESIGN.md`. Realizes the downstream direction
-from `DESIGN.md §18` as open-ended retrieval-augmented Q&A. Core principles:
-canonical transcripts are the source of truth and are pulled once; chunks,
-embeddings, and indexes are **derived and rebuildable with no network access**;
-retrieval is hybrid (dense + BM25 in one LanceDB store) with a rerank stage;
-answers are **grounded** with episode+timestamp deep links or an explicit
-`insufficient_evidence` outcome;
-a built-in eval harness (recall@k / MRR / faithfulness) makes retrieval changes
-measured, not vibe-checked. Build phases **R0–R6** (R0 = bank the canonical
-corpus). Nothing here is implemented yet.
+### Corpus & query (the ask half) — built (R0–R7)
+Design in `docs/RETRIEVAL_DESIGN.md`; all phases implemented and unit-tested via
+injected adapters (fake embedder / context client / answer client / diarizer —
+no network or model downloads in CI). Core principles as built: canonical
+transcripts are the source of truth and are pulled once (`corpus add`, reusing
+`find`+`pull` under the same egress gate); chunks, contextual blurbs,
+embeddings, and indexes are **derived and rebuildable with no network access**
+(`corpus build`, versioned per §14); retrieval is hybrid (dense + BM25 in ONE
+LanceDB table, built-in RRF) with a cross-encoder rerank stage and prefilter
+metadata filters; answers are **grounded** with episode+timestamp deep links or
+an explicit `insufficient_evidence` outcome (`transcript ask`, fabricated
+citations fail closed); the eval harness (`transcript eval`, recall@k / MRR /
+faithfulness judge, `--compare` regression gate) makes retrieval changes
+measured, not vibe-checked; and diarization is a per-episode opt-in
+(`corpus add --diarize`) yielding a mixed corpus with `--speaker` filtering.
+
+```
+# bank a channel's transcripts (canonical layer)
+transcript corpus add moonshots --channel @peterdiamandis --no-shorts --enable-public-url
+# derive chunks -> context -> embeddings -> one LanceDB index (offline)
+transcript corpus build moonshots            # add --no-context to keep it fully local
+# ask, grounded, with deep-link citations
+transcript ask "what did they say about compute as a tradeable asset?" --json
+# measure retrieval changes
+transcript eval moonshots --out baseline.json
+transcript eval moonshots --compare baseline.json
+# decipher one specific episode with speaker labels (opt-in, heavier)
+transcript corpus add moonshots VIDEO_ID --diarize --enable-public-url
+```
+
+Extras: `retrieval` (lancedb+tiktoken, required), `embed`/`rerank`
+(sentence-transformers for the local embedder + reranker), `answer` (anthropic,
+for context blurbs + answering), `embed_api` (voyageai, optional egress),
+`diarize` (pyannote.audio). A captions-only user installs none of them.
 
 Verification is environment-specific: the unit suite is the portable guarantee
 (`pytest -q`); the live/real-model paths depend on local runtime deps. Run

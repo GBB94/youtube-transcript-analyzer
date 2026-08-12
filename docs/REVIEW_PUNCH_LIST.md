@@ -9,13 +9,13 @@ Severity: **H** = fix before building R0 on top · **M** = fix soon · **L** = o
 
 ## Correctness
 
-- [ ] **H — Web job durability is not what it claims.** If the worker process dies
+- [x] **H — Web job durability is not what it claims.** *(fixed: `JobStore.recover_orphans` + startup relaunch in `create_app`)* If the worker process dies
   mid-item, the item stays `running` forever and nothing on startup requeues
   `queued` items of unfinished jobs (`web/worker.py:60-75`, `web/jobs.py`). The
   README's "survives a refresh or restart" holds for the render only. Fix: on
   `create_app`/worker start, requeue orphaned `running` items and resume `queued`
   items of unfinished jobs.
-- [ ] **H — SSE endpoint loops forever on unknown job ids.** `job_events`
+- [x] **H — SSE endpoint loops forever on unknown job ids.** *(fixed: 404 on unknown job; SQLite via `asyncio.to_thread`)* `job_events`
   (`web/app.py:133-150`) never checks the job exists; total=0 means `finished` is
   never true, so each bad connection polls SQLite every 0.3 s indefinitely. Also
   calls synchronous SQLite (30 s busy timeout) inside the async generator,
@@ -48,8 +48,8 @@ Severity: **H** = fix before building R0 on top · **M** = fix soon · **L** = o
   `assert_safe_url` only checks the scheme — the CLI hands any host to yt-dlp with
   `--enable-public-url`, contradicting `DESIGN.md §12`'s allowlist promise.
   (The web path is safe: it canonicalizes to a strict watch URL, `web/parse.py:71`.)
-- [ ] **L — Document `MANAGED_API_BASE_URL`** in `.env.example` (read at
-  `managed.py:228`).
+- [x] **L — Document `MANAGED_API_BASE_URL`** in `.env.example` (read at
+  `managed.py:228`). *(done, with the retrieval-half keys alongside)*
 - [ ] **L — Sanitize lock keys** before path interpolation (`locking.py:55`) —
   defensive only; current callers pass hex hashes.
 
@@ -66,7 +66,7 @@ Severity: **H** = fix before building R0 on top · **M** = fix soon · **L** = o
 
 ## Tooling & packaging
 
-- [ ] **H — No linter/formatter/type-checker.** Add `ruff` + `mypy` to the `dev`
+- [x] **H — No linter/formatter/type-checker.** *(added: ruff + mypy in dev extra, `[tool.ruff]`/`[tool.mypy]` configured, tree ruff-clean)* Add `ruff` + `mypy` to the `dev`
   extra and configure `[tool.ruff]` / `[tool.mypy]` in `pyproject.toml` before
   building R0–R6, so the retrieval code is born under enforcement. The tree is
   ~90 % annotated already; several findings above would have been caught
@@ -80,10 +80,10 @@ Severity: **H** = fix before building R0 on top · **M** = fix soon · **L** = o
 
 ## Repo hygiene
 
-- [ ] **H — Commit the spec work.** `docs/RETRIEVAL_DESIGN.md` is untracked and
+- [x] **H — Commit the spec work.** *(committed in 8bc4cf9)* `docs/RETRIEVAL_DESIGN.md` is untracked and
   `CLAUDE.md` / `README.md` / `docs/DESIGN.md` / `.gitignore` carry uncommitted
   edits — the locked decisions exist only in the working tree.
-- [ ] **L — Root clutter:** `CONVERSATION_LOG.txt` is a *reconstruction*, not a
-  transcript (label or drop); `RETRIEVAL_DESIGN.txt` is a duplicate export of the
-  `.md` (regenerate on spec change or drop); `moonshot_EP278_transcript.md`
-  belongs under `corpus/` once R0 exists.
+- [x] **L — Root clutter:** `CONVERSATION_LOG.txt` labelled as a reconstruction;
+  `RETRIEVAL_DESIGN.txt` regenerated from the `.md` after the status change;
+  `moonshot_EP278_transcript.md` left at root until the first real `corpus add`
+  banks it properly.

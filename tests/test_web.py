@@ -8,7 +8,7 @@ import time
 from fastapi.testclient import TestClient
 
 from transcript_tool.schema import (
-    Language, Outcome, Provenance, Reason, Result, Retry, Segment, TimestampType, VideoRef,
+    Language, Provenance, Reason, Result, Retry, Segment, TimestampType, VideoRef,
 )
 from transcript_tool.web.app import create_app
 from transcript_tool.web.markdown import Record, render
@@ -219,3 +219,42 @@ def test_make_pull_appends_local_whisper_only_when_asr(monkeypatch):
     assert "local_whisper" not in seen["strategies"]
     make_pull(asr=True)(Target("x", "x", "https://youtu.be/x"))
     assert "local_whisper" in seen["strategies"]
+
+
+# --- punch-list fixes: SSE unknown job + startup recovery ---------------------
+
+def test_sse_unknown_job_returns_404_not_a_stream(tmp_path):
+    r = _client(tmp_path).get("/jobs/no-such-job/events")
+    assert r.status_code == 404
+
+
+def test_startup_recovery_requeues_orphans_and_relaunches(tmp_path):
+    """A worker that died mid-item leaves it `running`; a fresh app must flip it back
+    to queued and relaunch a worker for the unfinished job."""
+    from transcript_tool.web.jobs import (
+        JobStore, STATUS_COMPLETE, STATUS_RUNNING,
+    )
+    db = str(tmp_path / "jobs.sqlite")
+    store = JobStore(db)
+    store.create_job("j1", "2026-08-12T00:00:00+00:00", ["en"],
+                     [Target(A, A, f"https://youtu.be/{A}"), Target(B, B, f"https://youtu.be/{B}")])
+    # Simulate a crash: first item claimed (running), worker dies before finishing.
+    claimed = store.claim_next_queued("j1")
+    assert claimed is not None and store.get_items("j1")[0]["status"] == STATUS_RUNNING
+
+    launched = []
+
+    def run_worker(job_id):
+        launched.append(job_id)
+        process_job(db, job_id, pull=_fake_pull)
+
+    TestClient(create_app(db_path=db, run_worker=run_worker))
+    assert launched == ["j1"]                       # relaunched exactly once at startup
+    items = store.get_items("j1")
+    assert all(i["status"] == STATUS_COMPLETE for i in items)   # orphan requeued and run
+    assert store.counts("j1")["finished"]
+
+    # A finished store recovers nothing on the next startup.
+    launched.clear()
+    TestClient(create_app(db_path=db, run_worker=run_worker))
+    assert launched == []

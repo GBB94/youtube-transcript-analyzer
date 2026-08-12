@@ -29,10 +29,10 @@ def acquire_audio(ref: VideoRef, policy: Policy) -> str:
     args = build_subprocess_args("yt-dlp", flags, [ref.url])
     try:
         proc = subprocess.run(args, capture_output=True, text=True, cwd=str(workdir), timeout=600)
-    except FileNotFoundError:
-        raise MediaError(Reason.missing_dependency)
-    except subprocess.TimeoutExpired:
-        raise MediaError(Reason.timeout)
+    except FileNotFoundError as e:
+        raise MediaError(Reason.missing_dependency) from e
+    except subprocess.TimeoutExpired as e:
+        raise MediaError(Reason.timeout) from e
     files = sorted(workdir.glob("*"))
     if proc.returncode != 0 or not files:
         from .strategies.ytdlp_subs import map_ytdlp_error

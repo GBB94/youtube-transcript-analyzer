@@ -79,7 +79,7 @@ class FileLockBackend:
                 if e.errno not in (errno.EAGAIN, errno.EACCES):
                     raise
                 if time.monotonic() >= deadline:
-                    raise LockTimeout(f"timed out acquiring lock for {key!r}")
+                    raise LockTimeout(f"timed out acquiring lock for {key!r}") from None
                 time.sleep(self.poll_seconds)
 
 

@@ -7,7 +7,9 @@ timestamp. Caption acquisition is the hard, fragile half and is already built
 (`DESIGN.md`); this is the easy, stable half — but "easy" only if the storage and
 retrieval contracts are right from the start.*
 
-**Status:** new subsystem. Companion to `DESIGN.md` (the v3 acquisition brief).
+**Status:** BUILT — R0–R7 implemented 2026-08-12 (unit-tested via injected
+adapters; live-model paths are lazy optional extras verified outside CI).
+Companion to `DESIGN.md` (the v3 acquisition brief).
 This realizes the downstream direction anticipated in `DESIGN.md §18` ("run
 extraction on each transcript → turn video into structured signal"), generalized
 from feature-extraction to open-ended retrieval-augmented question answering.
@@ -366,6 +368,14 @@ await corpus_build(source_slug, *, rebuild=False)
 answer = await ask(query, *, source=None, since=None, k=8, filters={...})
 answer = ask_sync(query, ...)   # wrapper; raises inside a running loop
 ```
+
+*As built:* the signatures thread an explicit `CorpusStore` (root paths are
+caller state, not globals) and every external collaborator — pull, embedder,
+contextizer, answer client, reranker, diarizer — is an injectable parameter so
+the whole subsystem tests without network or models: `corpus.ingest.corpus_add
+(store, slug, refs, ...)`, `retrieval.build.corpus_build(store, slug, ...)`
+(sync — the derivation is CPU-bound file work), `retrieval.answer.ask(query, *,
+store, slug, ...)` / `ask_sync`.
 
 **CLI (new verbs alongside `pull` / `find` / `doctor`):**
 
