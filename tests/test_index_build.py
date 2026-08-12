@@ -178,3 +178,15 @@ def test_unsafe_filter_values_are_refused(tmp_path):
     index = ChunkIndex(tmp_path / "index" / "pod")
     with pytest.raises(ValueError):
         index.delete_video("x' OR '1'='1")
+
+
+def test_status_is_current_after_a_no_context_build(tmp_path):
+    """Regression: a fresh --no-context build must read as current — context off
+    is a recorded choice in build.json, not staleness against the module
+    constant. Caught on the first real corpus (status said stale=162)."""
+    from transcript_tool.corpus.status import corpus_status
+    store = _seed(tmp_path)
+    _build(store)
+    status = corpus_status(store, "pod")
+    assert status["indexed"] == 2 and status["stale"] == 0
+    assert status["stale_video_ids"] == [] and status["index_outdated"] is False
