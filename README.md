@@ -1,9 +1,16 @@
 # transcript-tool
 
-Staged, policy-driven video transcript acquisition. Caption strategies first,
-audio ASR as the floor.
+Two halves of one system:
 
-- **Start here:** `CLAUDE.md` (working agreement) and `docs/DESIGN.md` (full spec).
+1. **Acquisition ("the pull half") — built.** Staged, policy-driven video
+   transcript acquisition. Caption strategies first, audio ASR as the floor.
+2. **Corpus & query ("the ask half") — specified, not yet built.** Turn the pulled
+   transcripts into a durable, queryable knowledge base: ask a question, get an
+   answer grounded in what was said, with a citation back to the episode and exact
+   timestamp. Spec: **`docs/RETRIEVAL_DESIGN.md`**.
+
+- **Start here:** `CLAUDE.md` (working agreement), `docs/DESIGN.md` (acquisition
+  spec), and `docs/RETRIEVAL_DESIGN.md` (retrieval spec).
 - **Phase 1 task notes:** `docs/PHASE_1_BUILD.md`.
 
 ## Batch web UI (local)
@@ -51,6 +58,18 @@ macOS ARM (CPU).**
   `provisioning.warm()`. The real datastore/container/cgroup wiring is deploy-time.
 - **Phase 8 (hardening)** — failure-injection suite is green; `docs/SECURITY_REVIEW.md`
   audit done. Live canaries + SLO-conformance vs. real numbers remain infra-gated.
+
+### Corpus & query (the ask half) — specified, not yet built
+Design complete in `docs/RETRIEVAL_DESIGN.md`. Realizes the downstream direction
+from `DESIGN.md §18` as open-ended retrieval-augmented Q&A. Core principles:
+canonical transcripts are the source of truth and are pulled once; chunks,
+embeddings, and indexes are **derived and rebuildable with no network access**;
+retrieval is hybrid (dense + BM25 in one LanceDB store) with a rerank stage;
+answers are **grounded** with episode+timestamp deep links or an explicit
+`insufficient_evidence` outcome;
+a built-in eval harness (recall@k / MRR / faithfulness) makes retrieval changes
+measured, not vibe-checked. Build phases **R0–R6** (R0 = bank the canonical
+corpus). Nothing here is implemented yet.
 
 Verification is environment-specific: the unit suite is the portable guarantee
 (`pytest -q`); the live/real-model paths depend on local runtime deps. Run

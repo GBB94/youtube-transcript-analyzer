@@ -328,8 +328,14 @@ Usable personal tool = **Phases 1–4** (+ Phase 0 gating the public-URL path).
 ---
 
 ## 18. Future extensions
-- Speaker diarization (segment schema accommodates it).
+- **Corpus & query ("the ask half") — now specified in `docs/RETRIEVAL_DESIGN.md`.**
+  Turns transcripts into a queryable knowledge base (chunk → contextualize → embed →
+  hybrid retrieve + rerank → grounded answer with episode+timestamp citations). This
+  generalizes the "downstream pipeline push" idea below from fixed feature-extraction
+  to open-ended retrieval-augmented Q&A; **incremental channel monitoring** is part
+  of its R0 ingest (only-new via the manifest).
+- Speaker diarization (segment schema accommodates it) — also the optional R7 upgrade
+  in the retrieval brief, populating per-chunk `speaker` for speaker-filtered queries.
 - Cross-ID **audio-fingerprint** ASR reuse (deferred from core).
 - Downstream pipeline push: run extraction (feature mentions, competitor names, intent signals) on each transcript → existing store, turning video into the same structured signal as call transcripts.
 - Non-YouTube sources (Vimeo, Loom, podcasts) — Stage 3 generalizes; add source-specific acquirers.
-- Incremental channel monitoring (only new uploads since last run).

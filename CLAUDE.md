@@ -1,14 +1,22 @@
 # CLAUDE.md — working agreement for this repo
 
-Read this before writing code. The authoritative design is `docs/DESIGN.md` (the
-v3 brief); this file is the short, durable version Claude Code should follow on
-every run. When in doubt, the design doc wins; if you change a contract, update
-both.
+Read this before writing code. The authoritative designs are `docs/DESIGN.md` (the
+v3 acquisition brief) and `docs/RETRIEVAL_DESIGN.md` (the corpus & query brief);
+this file is the short, durable version Claude Code should follow on every run.
+When in doubt, the design docs win; if you change a contract, update both the doc
+and this file.
 
 ## What this is
-A staged, policy-driven tool that produces clean, provenance-rich transcripts
-from video. Caption strategies first, audio ASR as the floor. Reliability comes
-from honest staging + good contracts, not from pretending every video succeeds.
+Two halves of one system:
+1. **Acquisition (the pull half) — built.** A staged, policy-driven tool that
+   produces clean, provenance-rich transcripts from video. Caption strategies
+   first, audio ASR as the floor. Reliability comes from honest staging + good
+   contracts, not from pretending every video succeeds.
+2. **Corpus & query (the ask half) — specified in `docs/RETRIEVAL_DESIGN.md`, not
+   yet built.** Turn pulled transcripts into a queryable knowledge base: grounded
+   answers with episode+timestamp citations. Canonical transcripts are pulled once
+   and are the source of truth; everything downstream (chunks, embeddings, indexes)
+   is derived and rebuildable **with no network access**.
 
 ## Architecture (three stages — never call them "layers" or "L1/L2/L3")
 1. **Preflight** — produces *hints*, not truth. Short-circuit ONLY on authoritative
@@ -47,6 +55,32 @@ Then: normalize (versioned) → quality-gate → cache → emit.
 - **Model provisioning** (Phase 4): pre-provision + checksum out of band; load
   **lazily** on first ASR use (local) or warm at startup (server). **Never download
   a model mid-request** — a caption-first run must not load a multi-GB model.
+
+## Golden rules — retrieval half (see `docs/RETRIEVAL_DESIGN.md`; enforce once building R0+)
+- **Canonical vs. derived is sacred.** `corpus/<slug>/raw/*.json` is the only
+  expensive, never-discarded layer. Chunks, contextual blurbs, embeddings, and
+  indexes are pure functions of it and must rebuild **offline**. A version bump
+  rebuilds derived layers; it **never** re-pulls. No new YouTube access path —
+  ingest is `find`+`pull` under the existing `EgressPolicy` gate.
+- **Never flatten timestamps.** Every chunk carries `{video_id, start_s, end_s}`
+  so every answer is a working `…&t=<s>s` deep link.
+- **Grounded-answer invariant (the outcome-model analogue).** `answer_outcome` is
+  `grounded | insufficient_evidence | failed`. A `grounded` answer carries only
+  citations drawn from the retrieved set — **no fabricated timestamps**;
+  `insufficient_evidence` cites nothing and does **not** fall back to parametric
+  memory. Provenance (`platform_auto` vs `local_asr` …) is preserved to the answer.
+  **Parent-context expansion never widens citations**: the answerer may read ±1
+  neighbouring chunks, but a citation naming an expansion-only neighbour fails
+  validation.
+- **One index store.** Dense vectors and BM25 live in the same LanceDB table
+  (native FTS + built-in RRF hybrid) — never a second index directory that could
+  drift. No HyDE / keyword query expansion in v1 (measured to hurt; see
+  `RETRIEVAL_DESIGN.md §20.6`).
+- **Derivation is versioned.** `CHUNKER_VERSION` / `CONTEXT_VERSION` / embedder
+  revision / `INDEX_SCHEMA_VERSION` are the index cache key (the `policy_hash`
+  analogue). No silent behavioural change without a bump.
+- **Egress is explicit.** Contextual enrichment and API embeddings send text off
+  machine; both are disclosed and disableable (`--no-context`, `--embedder local`).
 
 ## Security (apply from the start, even before subprocesses exist)
 - Subprocesses use **argument arrays, never a shell**, and put **`--` before
@@ -98,9 +132,12 @@ src/transcript_tool/
   asr_eval.py        # jiwer regression harness (P4)
   media.py           # yt-dlp audio acquisition for URL->ASR (live-only)
   discover.py        # YouTube Data API discovery + dual-bucket quota (P6)
+  corpus/            # PLANNED (R0) — canonical store: CorpusRecord, manifest, raw/+markdown/ layers
+  retrieval/         # PLANNED (R1-R6) — chunk, context, embed, index (ONE LanceDB store: dense+FTS), rerank, answer, eval
 tests/             # pytest; golden VTT fixtures govern dedup
-docs/DESIGN.md     # the authoritative v3 spec
-docs/PHASE_1_BUILD.md  # the current task
+docs/DESIGN.md          # the authoritative v3 acquisition spec
+docs/RETRIEVAL_DESIGN.md # the corpus & query (ask half) spec
+docs/PHASE_1_BUILD.md   # the current task
 ```
 
 ## Build / run
@@ -142,6 +179,23 @@ transcript doctor
 > Public-URL strategies (`api_captions`, `ytdlp_subs`, and `local_whisper` from a
 > URL) are gated by `EgressPolicy.allow_public_url` and the CLI's
 > `--enable-public-url` flag. Do not enable by default; honor `DESIGN.md §4`.
+
+- **Planned — retrieval half (R0–R6, `docs/RETRIEVAL_DESIGN.md`):** none built yet.
+  R0 canonical corpus store (`corpus add`, reusing `find`+`pull`); R1 versioned
+  chunker (chapter/utterance-aware, timestamped `ChunkMeta`); R2 embeddings +
+  LanceDB dense index + offline `corpus build`; R3 hybrid (LanceDB native FTS
+  BM25 + RRF + rerank + metadata filters); R4 contextual enrichment
+  (prompt-cached, versioned, gated); R5 `transcript ask` (grounded answering +
+  ±1-chunk parent-context expansion + citations); R6 eval harness
+  (recall@k / MRR / faithfulness, `eval --compare` gate); R7 on-demand diarization
+  (`corpus add --diarize`, **default off, per-episode**, mixed corpus). New CLI
+  verbs: `corpus`, `ask`, `eval`. R0 first — it banks the canonical transcripts
+  everything else derives from. **Decisions locked:** contextual enrichment on by
+  default (switchable), local embeddings by default, captions-default with
+  diarization strictly opt-in per episode (never automatic on every pull), one
+  LanceDB store for dense+BM25, parent-context expansion at answer time (never
+  widening citations), no HyDE/keyword query expansion in v1
+  (`RETRIEVAL_DESIGN.md §20.4–20.6`).
 
 ## Supported platforms (v1)
 Tested target: **macOS ARM (CPU)**. Linux x86-64 should work; process-tree kill,
