@@ -343,6 +343,44 @@ def cmd_ask(args: argparse.Namespace) -> int:
     return {"grounded": 0, "insufficient_evidence": 1}.get(answer.answer_outcome, 2)
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Golden-set retrieval metrics + optional --compare regression gate (§13).
+    Exit codes: 0 ok, 3 regression past threshold, 2 usage."""
+    from .corpus.store import CorpusStore
+    from .retrieval.embed import get_embedder
+    from .retrieval.evalharness import compare, format_compare_table, load_golden, run_eval
+    from .retrieval.retrieve import LocalCrossEncoder
+
+    corpus_root = Path(args.corpus_root).expanduser()
+    golden_path = Path(args.golden) if args.golden else corpus_root / args.slug / "golden.json"
+    if not golden_path.exists():
+        _log(f"error: no golden set at {golden_path} (author one; see RETRIEVAL_DESIGN.md §13)")
+        return 2
+
+    store = CorpusStore(corpus_root)
+    reranker = None if args.no_rerank else LocalCrossEncoder()
+    report = run_eval(store, args.slug, load_golden(golden_path),
+                      embedder=get_embedder(args.embedder), reranker=reranker,
+                      k=args.k, log=_log)
+    payload = report.as_dict()
+    _log(f"eval: recall@{args.k}={payload['recall_at_k']} mrr={payload['mrr']} "
+         f"over {payload['n_questions']} questions")
+
+    if args.out:
+        Path(args.out).expanduser().write_text(json.dumps(payload, indent=2))
+        _log(f"eval: report written to {args.out}")
+
+    if args.compare:
+        baseline = json.loads(Path(args.compare).expanduser().read_text())
+        result = compare(baseline, payload, threshold=args.threshold)
+        _log(format_compare_table(result))
+        _emit({"report": payload, "compare": result})
+        return 0 if result["ok"] else 3
+
+    _emit(payload)
+    return 0
+
+
 def _have_module(name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(name) is not None
@@ -500,6 +538,19 @@ def build_parser() -> argparse.ArgumentParser:
                      help="emit the structured answer object (outcome, citations, trace)")
     ask.add_argument("--corpus-root", default="corpus")
     ask.set_defaults(func=cmd_ask)
+
+    ev = sub.add_parser("eval", help="golden-set retrieval metrics + regression gate (§13)")
+    ev.add_argument("slug")
+    ev.add_argument("--golden", help="golden-set JSON (default corpus/<slug>/golden.json)")
+    ev.add_argument("--k", type=int, default=8)
+    ev.add_argument("--embedder", choices=["local", "api"], default="local")
+    ev.add_argument("--no-rerank", action="store_true")
+    ev.add_argument("--compare", help="baseline report JSON to diff against")
+    ev.add_argument("--threshold", type=float, default=0.05,
+                    help="max allowed per-metric drop before the run fails")
+    ev.add_argument("--out", help="write the report JSON here as the next baseline")
+    ev.add_argument("--corpus-root", default="corpus")
+    ev.set_defaults(func=cmd_eval)
 
     doctor = sub.add_parser("doctor", help="check per-strategy runtime readiness")
     doctor.add_argument("--strategies", nargs="+",
