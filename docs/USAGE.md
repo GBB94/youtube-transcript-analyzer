@@ -78,7 +78,7 @@ prefilters) is identical in every path. Only the final answering layer differs.
 
 ```
 transcript retrieve "what did they say about compute as a tradeable asset?" \
-    [--source <slug>] [--since 2026-01-01] [--speaker SPEAKER_00] [--k 8] [--no-rerank]
+    [--source <slug>]... [--source all] [--since 2026-01-01] [--speaker SPEAKER_00] [--k 8] [--no-rerank]
 ```
 
 Exit codes: 0 hits, 1 no hits, 2 usage/missing index.
@@ -109,6 +109,11 @@ landing in this repo reads first):
   by `upload_date`.
 - *Thin results*: reformulate and re-query, raise `--k`, or drop `--no-rerank`;
   re-querying is cheap, guessing is forbidden.
+- *Cross-corpus questions*: `--source all` (or repeated `--source`) searches
+  every index and merges into one ranked list — by cross-encoder score when
+  reranking (comparable across indexes), by per-index rank otherwise; every hit
+  keeps its `source_slug`. "What do the two shows disagree on" still reads
+  best as one retrieve per source, compared explicitly.
 - *Models without shell access*: run the command yourself and paste the JSON —
   the contract rides inside the payload.
 

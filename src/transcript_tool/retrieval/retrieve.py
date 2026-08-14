@@ -102,6 +102,38 @@ class RetrievalTrace:
         return {h.chunk["chunk_id"] for h in self.hits}
 
 
+def merge_traces(traces: list[RetrievalTrace], k: int) -> RetrievalTrace:
+    """Merge per-source traces into one ranked list (multi-corpus queries).
+
+    Sound because every hit keeps its source attribution and the merge key is
+    comparable across indexes: when every trace was reranked, the cross-encoder
+    score is a query-passage judgment independent of which index produced the
+    candidate; without rerank, hits interleave by per-index fused rank (RRF
+    ranks are per-index and scores are NOT cross-index comparable, so rank is
+    the honest key). Never merges what it cannot order: a mix of reranked and
+    un-reranked traces is refused."""
+    live = [t for t in traces if t is not None]
+    if not live:
+        raise ValueError("nothing to merge")
+    rerank_states = {t.reranked for t in live}
+    if len(rerank_states) > 1:
+        raise ValueError("cannot merge reranked and un-reranked traces")
+    reranked = rerank_states.pop()
+
+    hits = [h for t in live for h in t.hits]
+    if reranked:
+        hits.sort(key=lambda h: (-(h.rerank_score or 0.0), h.fused_rank))
+    else:
+        hits.sort(key=lambda h: (h.fused_rank, -h.fused_score))
+
+    merged = RetrievalTrace(
+        query=live[0].query, where=live[0].where,
+        n_candidates=sum(t.n_candidates for t in live),
+        reranked=reranked, reranker=live[0].reranker)
+    merged.hits = hits[:k]
+    return merged
+
+
 def retrieve(index: ChunkIndex, query: str, *, embedder: Embedder,
              reranker: Optional[Reranker] = None,
              filters: Optional[Filters] = None,

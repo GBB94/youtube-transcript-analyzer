@@ -95,7 +95,8 @@ def test_retrieve_verb_emits_grounded_payload(tmp_path, capsys, monkeypatch):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert "Cite only chunk_ids" in payload["contract"]
-    assert payload["versions"]["embed_model"] == "fake-bow@1#32"
+    assert payload["sources"] == ["pod"] and payload["merged_by"] is None
+    assert payload["versions"]["pod"]["embed_model"] == "fake-bow@1#32"
     top = payload["hits"][0]
     assert "compute" in top["text"]
     assert top["url_with_timestamp"].endswith(f"t={int(top['start_s'])}s")
@@ -110,3 +111,52 @@ def test_retrieve_verb_emits_grounded_payload(tmp_path, capsys, monkeypatch):
     rc = main(["retrieve", "anything", "--source", "ghost",
                "--corpus-root", str(tmp_path / "corpus")])
     assert rc == 2
+
+
+def test_retrieve_across_all_sources_merges_with_attribution(tmp_path, capsys, monkeypatch):
+    """--source all searches every corpus and merges honestly: rank-interleaved
+    without rerank, every hit still naming its source_slug."""
+    import asyncio
+    from test_index_build import FakeEmbedder, _tokens, _success, _ref, SENTS_A, SENTS_B
+    from transcript_tool.corpus.ingest import corpus_add
+    from transcript_tool.corpus.records import CorpusVideo
+    from transcript_tool.corpus.store import CorpusStore
+    from transcript_tool.policy import Policy
+    from transcript_tool.retrieval.build import corpus_build
+    from transcript_tool.retrieval.chunk import ChunkConfig
+    import transcript_tool.retrieval.embed as embed_mod
+
+    store = CorpusStore(tmp_path / "corpus", index_root=tmp_path / "index")
+    cfg = ChunkConfig(max_tokens=30, min_tokens=8, overlap_ratio=0.1)
+    for slug, vid, sents in (("showa", "aaaaaaaaaaa", SENTS_A),
+                             ("showb", "bbbbbbbbbbb", SENTS_B)):
+        result = _success(vid, sents)
+
+        async def pull(ref, policy, cache, _r=result):
+            return _r
+
+        meta = {vid: CorpusVideo(id=vid, url=f"https://youtu.be/{vid}", title=slug)}
+        asyncio.run(corpus_add(store, slug, [_ref(vid)], policy=Policy(),
+                               meta=meta, pull=pull))
+        corpus_build(store, slug, embedder=FakeEmbedder(), chunk_config=cfg,
+                     token_counter=_tokens)
+    monkeypatch.setattr(embed_mod, "get_embedder", lambda kind: FakeEmbedder())
+
+    rc = main(["retrieve", "compute commodity fusion capital", "--source", "all",
+               "--no-rerank", "--k", "6", "--corpus-root", str(tmp_path / "corpus")])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sources"] == ["showa", "showb"]
+    assert payload["merged_by"] == "per_index_rank"
+    assert set(payload["versions"]) == {"showa", "showb"}
+    slugs_hit = {h["source_slug"] for h in payload["hits"]}
+    assert slugs_hit == {"showa", "showb"}       # both corpora contribute
+
+
+def test_merge_traces_refuses_mixed_rerank_states():
+    import pytest
+    from transcript_tool.retrieval.retrieve import RetrievalTrace, merge_traces
+    a = RetrievalTrace(query="q", where=None, n_candidates=50, reranked=True)
+    b = RetrievalTrace(query="q", where=None, n_candidates=50, reranked=False)
+    with pytest.raises(ValueError):
+        merge_traces([a, b], k=4)

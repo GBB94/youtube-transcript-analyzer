@@ -365,31 +365,50 @@ def cmd_retrieve(args: argparse.Namespace) -> int:
     from .corpus.store import CorpusStore
     from .retrieval.embed import get_embedder
     from .retrieval.index import ChunkIndex
-    from .retrieval.retrieve import Filters, LocalCrossEncoder, RetrieveConfig, retrieve
+    from .retrieval.retrieve import (
+        Filters, LocalCrossEncoder, RetrieveConfig, merge_traces, retrieve,
+    )
 
     corpus_root = Path(args.corpus_root).expanduser()
-    slug = args.source or _only_slug(corpus_root)
-    if not slug:
-        _log("error: pass --source <slug> (multiple or zero corpora found)")
-        return 2
-    store = CorpusStore(corpus_root)
-    index = ChunkIndex(store.index_dir(slug))
-    if not index.exists():
-        _log(f"error: no index for '{slug}' — run: transcript corpus build {slug}")
+    if args.source == ["all"]:
+        slugs = sorted(p.parent.name for p in corpus_root.glob("*/manifest.json"))
+    else:
+        slugs = args.source or ([_only_slug(corpus_root)] if _only_slug(corpus_root) else [])
+        slugs = [s for s in slugs if s]
+    if not slugs:
+        _log("error: pass --source <slug> (repeatable), or --source all")
         return 2
 
+    store = CorpusStore(corpus_root)
+    indexes = {}
+    for slug in slugs:
+        index = ChunkIndex(store.index_dir(slug))
+        if not index.exists():
+            _log(f"error: no index for '{slug}' — run: transcript corpus build {slug}")
+            return 2
+        indexes[slug] = index
+
+    embedder = get_embedder(args.embedder)
     reranker = None if args.no_rerank else LocalCrossEncoder()
-    trace = retrieve(index, args.query, embedder=get_embedder(args.embedder),
-                     reranker=reranker,
-                     filters=Filters(since=args.since, until=args.until,
-                                     speaker=args.speaker),
-                     config=RetrieveConfig(k=args.k))
-    build = index.read_build() or {}
+    filters = Filters(since=args.since, until=args.until, speaker=args.speaker)
+    config = RetrieveConfig(k=args.k)
+    traces = [retrieve(index, args.query, embedder=embedder, reranker=reranker,
+                       filters=filters, config=config)
+              for index in indexes.values()]
+    trace = traces[0] if len(traces) == 1 else merge_traces(traces, args.k)
+
+    versions = {}
+    for slug, index in indexes.items():
+        build = index.read_build() or {}
+        versions[slug] = {key: build.get(key) for key in
+                          ("chunker_version", "context_version", "embed_model")}
     _emit({
-        "query": args.query, "slug": slug, "k": args.k, "where": trace.where,
+        "query": args.query, "sources": list(indexes.keys()), "k": args.k,
+        "where": trace.where,
         "reranked": trace.reranked, "reranker": trace.reranker,
-        "versions": {key: build.get(key) for key in
-                     ("chunker_version", "context_version", "embed_model")},
+        "merged_by": ("rerank_score" if trace.reranked else "per_index_rank")
+                     if len(traces) > 1 else None,
+        "versions": versions,
         "contract": RETRIEVE_CONTRACT,
         "hits": [{
             **{key: v for key, v in h.chunk.items() if key != "search_text"},
@@ -657,7 +676,9 @@ def build_parser() -> argparse.ArgumentParser:
     ret = sub.add_parser("retrieve", help="retrieval only: top-k chunks as JSON, no LLM "
                                           "(the seam for an external answerer)")
     ret.add_argument("query")
-    ret.add_argument("--source", help="corpus slug (defaults when exactly one exists)")
+    ret.add_argument("--source", action="append",
+                     help="corpus slug; repeat for several, or pass 'all' to search "
+                          "every corpus (defaults to the sole corpus when one exists)")
     ret.add_argument("--since", help="only episodes uploaded on/after YYYY-MM-DD")
     ret.add_argument("--until", help="only episodes uploaded on/before YYYY-MM-DD")
     ret.add_argument("--speaker", help="only chunks attributed to this speaker (diarized)")

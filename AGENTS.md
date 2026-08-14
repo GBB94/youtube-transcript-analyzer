@@ -33,6 +33,9 @@ and a `contract` field. **The contract is binding:**
 - **Thin results**: reformulate and retrieve again (different phrasing, higher
   `--k`, or `--no-rerank` for a faster wider look). Re-querying is cheap;
   guessing is forbidden.
+- **Several corpora** (check `corpus/*/manifest.json`): `--source all` merges
+  every index into one ranked list, each hit keeping its `source_slug`; for
+  compare-the-shows questions, prefer one retrieve per source.
 - **Who said it**: only diarized episodes carry `speaker`; otherwise attribute
   to the episode, not a person, unless the text itself names the speaker.
 - **No shell access?** Have the operator run the command and paste the JSON —
